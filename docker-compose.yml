@@ -1,0 +1,28 @@
+services:
+  middleware:
+    build: .
+    container_name: incorutas-photo-sync
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - /mnt/trabajos:/mnt/trabajos
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: incorutas-redis
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local

@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master, dev ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Vitest with coverage
+        run: npm run test:coverage
+        env:
+          SUPABASE_URL: 'https://placeholder.supabase.co'
+          SUPABASE_SERVICE_KEY: 'placeholder-service-key'
+          WEBHOOK_SECRET: 'placeholder-webhook-secret-123456789'
+          API_TOKEN: 'placeholder-api-token-1234567890123'
+          TRABAJOS_BASE_PATH: './test_trabajos'
+          REDIS_HOST: '127.0.0.1'
+          REDIS_PORT: 6379

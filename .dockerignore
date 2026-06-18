@@ -1,0 +1,11 @@
+node_modules
+.env
+logs
+data
+test_trabajos_placeholder
+.git
+.husky
+tests
+*.md
+coverage
+docker-compose*.yml

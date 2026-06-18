@@ -1,0 +1,12 @@
+node_modules/
+.env
+logs/
+*.log
+scratch_test/
+.DS_Store
+data/*.json
+data/metrics.json
+coverage/
+.idea/
+.vscode/
+npm-debug.log*
