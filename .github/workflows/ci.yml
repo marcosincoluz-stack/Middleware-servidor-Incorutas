@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -42,7 +42,6 @@ jobs:
         env:
           SUPABASE_URL: 'https://placeholder.supabase.co'
           SUPABASE_SERVICE_KEY: 'placeholder-service-key'
-          WEBHOOK_SECRET: 'placeholder-webhook-secret-123456789'
           API_TOKEN: 'placeholder-api-token-1234567890123'
           TRABAJOS_BASE_PATH: './test_trabajos'
           REDIS_HOST: '127.0.0.1'
