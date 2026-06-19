@@ -19,6 +19,11 @@ function errorHandler(err, req, res, _next) {
     logger.warn(`Client error on ${req.method} ${req.path}: ${err.message}`);
   }
 
+  if (res.headersSent) {
+    logger.warn('Headers ya enviados, no se puede responder al cliente.');
+    return;
+  }
+
   res.status(statusCode).json({
     error: message,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })

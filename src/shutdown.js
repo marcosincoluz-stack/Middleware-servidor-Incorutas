@@ -5,6 +5,7 @@ const { stopPolling } = require('./jobs/polling');
 
 const HTTP_DRAIN_GRACE_MS = 2000;
 const FORCE_EXIT_TIMEOUT_MS = 35000;
+let isShuttingDown = false;
 
 /**
  * Manejo graceful de señales SIGTERM/SIGINT.
@@ -12,6 +13,12 @@ const FORCE_EXIT_TIMEOUT_MS = 35000;
  * cierra conexiones de Redis y persiste métricas.
  */
 function handleGracefulShutdown(signal, server) {
+  if (isShuttingDown) {
+    logger.warn(`Señal ${signal} recibida de nuevo. Cierre ya en progreso.`);
+    return;
+  }
+  isShuttingDown = true;
+
   logger.info(`\x1b[33m⏻ Señal ${signal} recibida. Iniciando cierre graceful...\x1b[0m`);
 
   server.close(() => {
@@ -42,19 +49,24 @@ async function shutdownResources() {
 
   let checks = 0;
   const maxChecks = 30;
-  let queueStatus = await jobQueue.getStatus();
 
-  while (queueStatus.isProcessing && checks < maxChecks) {
-    logger.info(`⏳ Esperando fin de tarea activa... (${checks + 1}/${maxChecks}s)`);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    queueStatus = await jobQueue.getStatus();
-    checks++;
-  }
+  try {
+    let queueStatus = await jobQueue.getStatus();
 
-  if (queueStatus.isProcessing) {
-    logger.warn('⚠️  Timeout de espera agotado. Cerrando con tareas activas.');
-  } else {
-    logger.info('✔ Cola finalizada limpiamente.');
+    while (queueStatus.isProcessing && checks < maxChecks) {
+      logger.info(`⏳ Esperando fin de tarea activa... (${checks + 1}/${maxChecks}s)`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      queueStatus = await jobQueue.getStatus();
+      checks++;
+    }
+
+    if (queueStatus.isProcessing) {
+      logger.warn('⚠️  Timeout de espera agotado. Cerrando con tareas activas.');
+    } else {
+      logger.info('✔ Cola finalizada limpiamente.');
+    }
+  } catch (err) {
+    logger.error('Error consultando estado de cola durante shutdown:', err.message);
   }
 
   try {

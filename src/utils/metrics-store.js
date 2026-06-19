@@ -131,4 +131,4 @@ class MetricsStore {
 
 // Exportar instancia singleton
 const metricsStore = new MetricsStore();
-module.exports = { metricsStore };
+module.exports = { MetricsStore, metricsStore };

@@ -145,7 +145,8 @@ async function pollPaidJobs() {
 let pollInterval = null;
 let approvedFailCount = 0;
 let paidFailCount = 0;
-let lastAlertSent = 0;
+let lastApprovedAlert = 0;
+let lastPaidAlert = 0;
 let isPolling = false;
 
 async function runPollCycle() {
@@ -155,7 +156,7 @@ async function runPollCycle() {
   } catch (err) {
     logger.error(`[Polling] Error en ciclo approved: ${err.message}`);
     approvedFailCount++;
-    await maybeAlertPollingFailure(approvedFailCount, err.message, 'approved');
+    await maybeAlertPollingFailure(approvedFailCount, err.message, 'approved', lastApprovedAlert, (ts) => { lastApprovedAlert = ts; });
   }
 
   try {
@@ -164,17 +165,17 @@ async function runPollCycle() {
   } catch (err) {
     logger.error(`[Polling] Error en ciclo paid: ${err.message}`);
     paidFailCount++;
-    await maybeAlertPollingFailure(paidFailCount, err.message, 'paid');
+    await maybeAlertPollingFailure(paidFailCount, err.message, 'paid', lastPaidAlert, (ts) => { lastPaidAlert = ts; });
   }
 }
 
-async function maybeAlertPollingFailure(failCount, lastError, cycleType) {
+async function maybeAlertPollingFailure(failCount, lastError, cycleType, lastAlertSent, setAlertSent) {
   if (failCount < config.POLLING_FAILURE_ALERT_THRESHOLD) return;
 
   const now = Date.now();
   if (now - lastAlertSent < config.POLLING_ALERT_COOLDOWN_MS) return;
 
-  lastAlertSent = now;
+  setAlertSent(now);
   try {
     await notify.alertPollingFailure(failCount, lastError, cycleType);
   } catch (err) {

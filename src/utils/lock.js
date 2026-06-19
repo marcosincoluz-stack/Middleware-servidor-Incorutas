@@ -61,6 +61,7 @@ class RedisLockProvider {
    */
   constructor(redis) {
     this._redis = redis;
+    this._owners = new Map();
   }
 
   /**
@@ -77,8 +78,7 @@ class RedisLockProvider {
     const result = await this._redis.set(redisKey, ownerId, 'PX', ttlMs, 'NX');
 
     if (result === 'OK') {
-      this._ownerId = ownerId;
-      this._lockedKey = key;
+      this._owners.set(key, ownerId);
       logger.debug(`Lock Redis adquirido para "${key}" (TTL: ${ttlMs}ms, owner: ${ownerId})`);
     } else {
       throw new Error(`Lock contention: el recurso "${key}" ya está bloqueado en Redis. Intenta de nuevo más tarde.`);
@@ -91,7 +91,8 @@ class RedisLockProvider {
    * @returns {Promise<void>}
    */
   async release(key) {
-    if (!this._ownerId) return;
+    const ownerId = this._owners.get(key);
+    if (!ownerId) return;
 
     const redisKey = `${LOCK_PREFIX}${key}`;
     const script = `
@@ -103,7 +104,7 @@ class RedisLockProvider {
     `;
 
     try {
-      const result = await this._redis.eval(script, 1, redisKey, this._ownerId);
+      const result = await this._redis.eval(script, 1, redisKey, ownerId);
       if (result === 1) {
         logger.debug(`Lock Redis liberado para "${key}"`);
       } else {
@@ -111,6 +112,8 @@ class RedisLockProvider {
       }
     } catch (err) {
       logger.debug(`Error liberando lock Redis para "${key}": ${err.message}`);
+    } finally {
+      this._owners.delete(key);
     }
   }
 

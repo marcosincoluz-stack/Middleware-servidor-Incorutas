@@ -24,8 +24,8 @@ class CircuitBreaker {
    */
   constructor(name, options = {}) {
     this.name = name;
-    this.failureThreshold = options.failureThreshold || DEFAULT_FAILURE_THRESHOLD;
-    this.resetTimeoutMs = options.resetTimeoutMs || DEFAULT_RESET_TIMEOUT_MS;
+    this.failureThreshold = options.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
+    this.resetTimeoutMs = options.resetTimeoutMs ?? DEFAULT_RESET_TIMEOUT_MS;
     this.state = STATES.CLOSED;
     this.failureCount = 0;
     this.lastFailureTime = null;

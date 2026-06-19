@@ -50,6 +50,7 @@ const MAX_UNIQUE_ATTEMPTS = 100;
 /**
  * Resuelve un nombre de archivo único dentro de una carpeta.
  * Si el archivo ya existe, añade sufijo (1), (2), etc. antes de la extensión.
+ * No crea el archivo — la atomicidad la garantiza el rename .part → dest en downloadFileWithRetry.
  *
  * @param {string} targetFolder Carpeta destino
  * @param {string} filename Nombre base del archivo
@@ -181,6 +182,10 @@ async function downloadFileWithRetry(storagePath, destFilePath) {
   const baseDelay = config.DOWNLOAD_RETRY_DELAY_MS;
   const partPath = `${destFilePath}.part`;
   let attempt = 0;
+
+  if (maxRetries < 1) {
+    throw new Error(`DOWNLOAD_MAX_RETRIES debe ser >= 1 (actual: ${maxRetries})`);
+  }
 
   await fs.promises.unlink(partPath).catch(() => {});
 
@@ -339,7 +344,7 @@ async function processJobApproved(jobId, jobTitle) {
 
   // 5. Descargar cada foto secuencialmente
   let downloadedCount = 0;
-  let skippedCount = 0;
+  const skippedCount = 0;
   let errorCount = 0;
 
   for (const ev of evidences) {
@@ -370,22 +375,6 @@ async function processJobApproved(jobId, jobTitle) {
     try {
       ensurePathWithinBase(destFilePath, targetFolder);
 
-      let fileExists = false;
-      try {
-        const stat = await fs.promises.stat(destFilePath);
-        fileExists = stat.size > 0;
-      } catch {
-        fileExists = false;
-      }
-
-      if (fileExists) {
-        logger.debug(`[Downloader] El archivo ya existe localmente y no está vacío: "${path.basename(destFilePath)}". Omitiendo.`);
-        await updateEvidenceLocalPath(ev.id, destFilePath);
-        skippedCount++;
-        continue;
-      }
-
-      // Descargar con reintentos
       await downloadFileWithRetry(storagePath, destFilePath);
       await updateEvidenceLocalPath(ev.id, destFilePath);
       downloadedCount++;
@@ -489,21 +478,6 @@ async function retryFailedEvidences(jobId) {
 
     try {
       ensurePathWithinBase(destFilePath, targetFolder);
-
-      let fileExists = false;
-      try {
-        const stat = await fs.promises.stat(destFilePath);
-        fileExists = stat.size > 0;
-      } catch {
-        fileExists = false;
-      }
-
-      if (fileExists) {
-        logger.debug(`[RetryFailed] El archivo ya existe localmente: "${path.basename(destFilePath)}". Actualizando local_path.`);
-        await updateEvidenceLocalPath(ev.id, destFilePath);
-        succeeded++;
-        continue;
-      }
 
       await downloadFileWithRetry(storagePath, destFilePath);
       await updateEvidenceLocalPath(ev.id, destFilePath);

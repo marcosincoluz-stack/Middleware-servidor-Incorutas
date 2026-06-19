@@ -114,12 +114,12 @@ async function runBackfill() {
 
     try {
       const result = await processJobApproved(job.id, job.title);
-      if (result && result.skipped) {
+      if (result && result.skipped === true) {
         console.log(`⏭️  Job omitido: ${result.reason}`);
       } else {
         const downloaded = result?.downloaded ?? 0;
-        const skipped = result?.skipped ?? 0;
-        console.log(`✅ Job procesado con éxito. Fotos descargadas: ${downloaded}, Omitidas: ${skipped}`);
+        const skippedCount = (typeof result?.skipped === 'number') ? result.skipped : 0;
+        console.log(`✅ Job procesado con éxito. Fotos descargadas: ${downloaded}, Omitidas: ${skippedCount}`);
         totalDownloaded += downloaded;
       }
       successCount++;

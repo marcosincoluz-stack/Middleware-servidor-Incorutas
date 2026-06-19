@@ -19,6 +19,7 @@ const router = express.Router();
 router.use(verifyApiToken);
 
 let dashboardCache = { data: null, timestamp: 0 };
+let dashboardFetchInProgress = false;
 let failedEvidencesCache = { data: null, timestamp: 0 };
 let logsCache = { data: null, timestamp: 0 };
 
@@ -27,6 +28,15 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   if (dashboardCache.data && (now - dashboardCache.timestamp) < config.DASHBOARD_CACHE_TTL_MS) {
     return res.json(dashboardCache.data);
   }
+
+  if (dashboardFetchInProgress) {
+    if (dashboardCache.data) {
+      return res.json(dashboardCache.data);
+    }
+    return res.status(503).json({ error: 'Dashboard refrescando, reintente en unos segundos' });
+  }
+
+  dashboardFetchInProgress = true;
   let smbMounted = false;
   let diskInfo = null;
   let supabaseOk = false;
@@ -97,6 +107,7 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
   };
 
   dashboardCache = { data, timestamp: now };
+  dashboardFetchInProgress = false;
   res.json(data);
 }));
 
@@ -274,7 +285,11 @@ router.get('/failed-evidences', asyncHandler(async (req, res) => {
 }));
 
 router.post('/retry-failed/:jobId', asyncHandler(async (req, res) => {
-  const { jobId } = retryFailedSchema.parse({ jobId: req.params.jobId });
+  const parsed = retryFailedSchema.safeParse({ jobId: req.params.jobId });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues.map(i => i.message).join(', ') });
+  }
+  const { jobId } = parsed.data;
   logger.info(`👤 Petición de reintento de fotos fallidas para Job ${jobId} desde el Dashboard`);
 
   const result = await retryFailedEvidences(jobId);

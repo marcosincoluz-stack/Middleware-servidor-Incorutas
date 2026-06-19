@@ -9,10 +9,10 @@ describe('error-classifier', () => {
       expect(classifyError(err)).toEqual({ type: 'disk_full', action: 'alert_disk' });
     });
 
-    it('clasifica ENOENT como smb_disconnected', () => {
+    it('clasifica ENOENT como unknown (no es SMB desconectado)', () => {
       const err = new Error('ENOENT: no such file or directory');
       err.code = 'ENOENT';
-      expect(classifyError(err)).toEqual({ type: 'smb_disconnected', action: 'alert_smb' });
+      expect(classifyError(err)).toEqual({ type: 'unknown', action: 'none' });
     });
 
     it('clasifica EACCES como smb_disconnected', () => {

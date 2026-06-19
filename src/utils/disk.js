@@ -11,11 +11,12 @@ const { logger } = require('./logger');
  * @returns {Promise<{freeMB: number, isSafe: boolean}>} Espacio libre en MB y flag indicando si es seguro continuar
  */
 async function checkDiskSpace(targetPath = config.TRABAJOS_BASE_PATH, timeoutMs = 5000) {
+  let timer;
   try {
     const statfsPromise = fs.promises.statfs(targetPath);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout statfs tras ${timeoutMs}ms`)), timeoutMs)
-    );
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timeout statfs tras ${timeoutMs}ms`)), timeoutMs);
+    });
 
     const stats = await Promise.race([statfsPromise, timeoutPromise]);
 
@@ -37,6 +38,8 @@ async function checkDiskSpace(targetPath = config.TRABAJOS_BASE_PATH, timeoutMs 
   } catch (err) {
     logger.error(`Error de E/S al comprobar el espacio de disco en "${targetPath}":`, err.message);
     throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

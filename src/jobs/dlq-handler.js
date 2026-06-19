@@ -9,15 +9,18 @@ const { logger } = require('../utils/logger');
  */
 async function getFailedJobs(queue) {
   const failed = await queue.getFailed();
-  return failed.map(job => ({
-    bullJobId: job.id,
-    jobId: job.data.jobId,
-    title: job.data.title,
-    event: job.data.event,
-    failedAt: new Date(job.failedReason ? job.finishedOn : job.processedOn).toISOString(),
-    error: job.failedReason,
-    attemptsMade: job.attemptsMade
-  }));
+  return failed.map(job => {
+    const timestamp = job.failedReason ? job.finishedOn : job.processedOn;
+    return {
+      bullJobId: job.id,
+      jobId: job.data.jobId,
+      title: job.data.title,
+      event: job.data.event,
+      failedAt: timestamp ? new Date(timestamp).toISOString() : null,
+      error: job.failedReason,
+      attemptsMade: job.attemptsMade
+    };
+  });
 }
 
 /**
@@ -38,8 +41,8 @@ async function retryFailedJob(queue, bullJobId, enqueueFn) {
   const { jobId, title, event } = job.data;
   logger.info(`Reintentando job fallido de DLQ: ${jobId} (Bull ID: ${bullJobId})`);
 
-  await job.remove();
   await enqueueFn(jobId, title, event);
+  await job.remove();
 }
 
 /**

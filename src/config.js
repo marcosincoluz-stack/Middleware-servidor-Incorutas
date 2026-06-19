@@ -27,6 +27,7 @@ if (isDev && !process.env.API_TOKEN) {
 
 const requiredEnv = [
   'SUPABASE_URL',
+  'SUPABASE_SERVICE_KEY',
   'TRABAJOS_BASE_PATH',
   'API_TOKEN'
 ];
