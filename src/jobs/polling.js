@@ -175,12 +175,13 @@ async function pollStaleJobs() {
 
   const { data: staleJobs, error: jobsError } = await supabase
     .from('jobs')
-    .select('id, title, downloaded_at')
+    .select('id, title, downloaded_at, status')
     .in('id', staleJobIds)
-    .not('downloaded_at', 'is', null);
+    .in('status', ['approved', 'paid']);
 
   if (jobsError) throw jobsError;
   if (!staleJobs || staleJobs.length === 0) {
+    logger.info(`[Polling] Auto-heal: ${staleJobIds.length} job_ids en evidence pero 0 jobs válidos encontrados`);
     return { found: 0, healed: 0 };
   }
 
@@ -188,10 +189,17 @@ async function pollStaleJobs() {
 
   for (const job of staleJobs) {
     try {
-      const { retryFailedEvidences } = require('../services/downloader');
-      logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
-      const result = await retryFailedEvidences(job.id);
-      if (result.succeeded > 0) {
+      if (job.downloaded_at) {
+        const { retryFailedEvidences } = require('../services/downloader');
+        logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
+        const result = await retryFailedEvidences(job.id);
+        if (result.succeeded > 0) {
+          healed++;
+        }
+      } else {
+        const { processJobApproved } = require('../services/downloader');
+        logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") sin downloaded_at. Procesando descarga completa...`);
+        await processJobApproved(job.id, job.title);
         healed++;
       }
     } catch (err) {
