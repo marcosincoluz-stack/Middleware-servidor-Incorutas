@@ -152,6 +152,8 @@ async function pollPaidJobs() {
  * @returns {Promise<{ found: number, healed: number }>}
  */
 async function pollStaleJobs() {
+  logger.debug('[Polling] Auto-heal: iniciando ciclo');
+
   const { data: pendingEvidence, error } = await withTimeout(
     supabase
       .from('evidence')
@@ -163,8 +165,11 @@ async function pollStaleJobs() {
 
   if (error) throw error;
   if (!pendingEvidence || pendingEvidence.length === 0) {
+    logger.debug('[Polling] Auto-heal: no hay evidencias pendientes');
     return { found: 0, healed: 0 };
   }
+
+  logger.info(`[Polling] Auto-heal: ${pendingEvidence.length} evidencias pendientes encontradas`);
 
   const staleJobIds = [...new Set(pendingEvidence.map(e => e.job_id))];
 
