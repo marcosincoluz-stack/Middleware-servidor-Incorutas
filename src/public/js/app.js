@@ -521,6 +521,17 @@ async function clearDlq() {
   }
 }
 
+function formatFailedCounts(job) {
+  const parts = [];
+  if (job.failedPhotos > 0) {
+    parts.push(`${job.failedPhotos} foto${job.failedPhotos > 1 ? 's' : ''}`);
+  }
+  if (job.failedSignatures > 0) {
+    parts.push(`${job.failedSignatures} acta${job.failedSignatures > 1 ? 's' : ''}`);
+  }
+  return parts.join(', ') || `${job.failedCount} evidencia${job.failedCount > 1 ? 's' : ''}`;
+}
+
 async function fetchFailedEvidences() {
   try {
     const res = await authFetch(`${API_BASE}/api/failed-evidences`, {}, 'failed-ev');
@@ -548,7 +559,7 @@ async function fetchFailedEvidences() {
             <div class="recent-job__left" style="min-width: 0; flex-grow: 1;">
               <span class="recent-job__dot recent-job__dot--failed"></span>
               <span class="recent-job__title" style="font-weight: 600;" title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</span>
-              <span class="badge badge--warning" style="font-size: 0.65rem; flex-shrink: 0;">${job.failedCount} foto${job.failedCount > 1 ? 's' : ''}</span>
+              <span class="badge badge--warning" style="font-size: 0.65rem; flex-shrink: 0;">${formatFailedCounts(job)}</span>
             </div>
             <button class="btn btn--default" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; flex-shrink: 0;" onclick="retryFailed('${job.jobId}', this)">
               Reintentar

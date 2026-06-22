@@ -173,7 +173,7 @@ async function pollStaleJobs() {
         .from('evidence')
         .select('id')
         .eq('job_id', job.id)
-        .eq('type', 'photo')
+        .in('type', ['photo', 'signature'])
         .is('local_path', null)
         .limit(1);
 

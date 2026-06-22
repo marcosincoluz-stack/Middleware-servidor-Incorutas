@@ -258,27 +258,37 @@ router.get('/failed-evidences', asyncHandler(async (req, res) => {
 
     const { data: failedEvs, error: evError } = await supabase
       .from('evidence')
-      .select('job_id')
+      .select('job_id, type')
       .in('job_id', jobIds)
-      .eq('type', 'photo')
+      .in('type', ['photo', 'signature'])
       .is('local_path', null);
 
     if (evError) throw evError;
 
     const failedByJob = new Map();
     for (const ev of (failedEvs || [])) {
-      const count = failedByJob.get(ev.job_id) || 0;
-      failedByJob.set(ev.job_id, count + 1);
+      if (!failedByJob.has(ev.job_id)) {
+        failedByJob.set(ev.job_id, { total: 0, photos: 0, signatures: 0 });
+      }
+      const entry = failedByJob.get(ev.job_id);
+      entry.total++;
+      if (ev.type === 'photo') entry.photos++;
+      if (ev.type === 'signature') entry.signatures++;
     }
 
     return jobs
       .filter(job => failedByJob.has(job.id))
-      .map(job => ({
-        jobId: job.id,
-        title: job.title,
-        downloadedAt: job.downloaded_at,
-        failedCount: failedByJob.get(job.id) || 0
-      }));
+      .map(job => {
+        const counts = failedByJob.get(job.id);
+        return {
+          jobId: job.id,
+          title: job.title,
+          downloadedAt: job.downloaded_at,
+          failedCount: counts.total,
+          failedPhotos: counts.photos,
+          failedSignatures: counts.signatures
+        };
+      });
   })();
 
   const results = await Promise.race([queryPromise, timeoutPromise]);

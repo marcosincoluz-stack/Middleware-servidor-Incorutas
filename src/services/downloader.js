@@ -309,7 +309,7 @@ async function processJobApproved(jobId, jobTitle) {
     throw new Error(`[Downloader] Abortando descarga por falta de espacio en disco. Libre: ${disk.freeMB.toFixed(2)} MB`);
   }
 
-  // 3. Consultar evidencias de tipo 'photo' en la BD
+  // 3. Consultar evidencias de tipo 'photo' y 'signature' (actas) en la BD
   let evidences = [];
   try {
     const { data, error } = await withTimeout(
@@ -317,7 +317,7 @@ async function processJobApproved(jobId, jobTitle) {
         .from('evidence')
         .select('id, url, type')
         .eq('job_id', jobId)
-        .eq('type', 'photo')
+        .in('type', ['photo', 'signature'])
         .is('local_path', null)
         .limit(config.MAX_EVIDENCES_PER_JOB)
     );
@@ -445,7 +445,7 @@ async function retryFailedEvidences(jobId) {
     .from('evidence')
     .select('id, url, type')
     .eq('job_id', jobId)
-    .eq('type', 'photo')
+    .in('type', ['photo', 'signature'])
     .is('local_path', null)
     .limit(config.MAX_EVIDENCES_PER_JOB);
 

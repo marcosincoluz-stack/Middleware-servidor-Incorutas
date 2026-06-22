@@ -167,7 +167,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
       const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqEvType = vi.fn().mockReturnValue({ is: mockIs });
-      const mockEqEvId = vi.fn().mockReturnValue({ eq: mockEqEvType });
+      const mockEqEvId = vi.fn().mockReturnValue({ in: mockEqEvType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqEvId });
 
       mockFrom.mockImplementation((table) => {
@@ -196,7 +196,7 @@ describe('downloader service', () => {
       });
       const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -223,7 +223,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
       const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -271,7 +271,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
       const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -399,7 +399,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -428,7 +428,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -463,7 +463,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -493,7 +493,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       mockFrom.mockImplementation((table) => {
@@ -523,7 +523,7 @@ describe('downloader service', () => {
       const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
       const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
-      const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
       let jobsUpdateCalled = false;
