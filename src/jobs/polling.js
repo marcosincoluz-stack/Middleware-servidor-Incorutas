@@ -143,56 +143,59 @@ async function pollPaidJobs() {
 }
 
 /**
- * Auto-healing: busca evidence con local_path IS NULL (fotos/actas pendientes),
- * identifica los jobs correspondientes, y re-intenta descargar las evidencias faltantes.
+ * Auto-healing: busca jobs approved/paid ya descargados que tengan evidence
+ * con local_path IS NULL, y re-intenta descargar las evidencias faltantes.
  *
- * Consulta directamente la tabla evidence (no jobs) para garantizar que encuentra
- * todos los jobs con pendientes, no solo los más recientes.
+ * Consulta primero la tabla jobs filtrando por status, luego evidence de esos jobs,
+ * para evitar que evidence huérfana de jobs rejected/cancelled llene el LIMIT.
  *
  * @returns {Promise<{ found: number, healed: number }>}
  */
 async function pollStaleJobs() {
   logger.debug('[Polling] Auto-heal: iniciando ciclo');
 
-  const { data: pendingEvidence, error } = await withTimeout(
+  const { data: candidateJobs, error: jobsError } = await withTimeout(
     supabase
-      .from('evidence')
-      .select('job_id')
-      .in('type', ['photo', 'signature'])
-      .is('local_path', null)
-      .limit(500)
+      .from('jobs')
+      .select('id, title, downloaded_at')
+      .in('status', ['approved', 'paid'])
+      .not('downloaded_at', 'is', null)
+      .order('downloaded_at', { ascending: false })
+      .limit(100)
   );
 
-  if (error) throw error;
-  if (!pendingEvidence || pendingEvidence.length === 0) {
-    logger.debug('[Polling] Auto-heal: no hay evidencias pendientes');
-    return { found: 0, healed: 0 };
-  }
-
-  logger.info(`[Polling] Auto-heal: ${pendingEvidence.length} evidencias pendientes encontradas`);
-
-  const staleJobIds = [...new Set(pendingEvidence.map(e => e.job_id))];
-
-  const { data: staleJobs, error: jobsError } = await supabase
-    .from('jobs')
-    .select('id, title, downloaded_at, status')
-    .in('id', staleJobIds)
-    .in('status', ['approved', 'paid']);
-
   if (jobsError) throw jobsError;
-  if (!staleJobs || staleJobs.length === 0) {
-    logger.info(`[Polling] Auto-heal: ${staleJobIds.length} job_ids en evidence pero 0 jobs válidos encontrados`);
+  if (!candidateJobs || candidateJobs.length === 0) {
+    logger.debug('[Polling] Auto-heal: no hay jobs descargados approved/paid');
     return { found: 0, healed: 0 };
   }
+
+  const jobIds = candidateJobs.map(j => j.id);
+
+  const { data: pendingEvidence, error: evError } = await supabase
+    .from('evidence')
+    .select('job_id')
+    .in('job_id', jobIds)
+    .in('type', ['photo', 'signature'])
+    .is('local_path', null);
+
+  if (evError) throw evError;
+  if (!pendingEvidence || pendingEvidence.length === 0) {
+    return { found: 0, healed: 0 };
+  }
+
+  const pendingJobIds = new Set(pendingEvidence.map(e => e.job_id));
+  const staleJobs = candidateJobs.filter(j => pendingJobIds.has(j.id));
+
+  if (staleJobs.length === 0) {
+    return { found: 0, healed: 0 };
+  }
+
+  logger.info(`[Polling] Auto-heal: ${staleJobs.length} jobs con evidencias pendientes`);
 
   let healed = 0;
 
   for (const job of staleJobs) {
-    if (!job.downloaded_at) {
-      logger.debug(`[Polling] Auto-heal: Job ${job.id} sin downloaded_at. Lo maneja pollApprovedJobs via BullMQ.`);
-      continue;
-    }
-
     try {
       const { retryFailedEvidences } = require('../services/downloader');
       logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
