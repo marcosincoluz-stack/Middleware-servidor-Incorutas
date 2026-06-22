@@ -1,6 +1,6 @@
 # Guía de Despliegue — incorutas-photo-sync en Ubuntu Server
 
-Tutorial paso a paso basado en la experiencia real de despliegue. Incluye los problemas encontrados y sus soluciones.
+Tutorial paso a paso actualizado con todos los fixes de los Sprints 1-5. Sigue esta guía en orden y no tendrás que dar vueltas.
 
 ---
 
@@ -11,24 +11,19 @@ Tutorial paso a paso basado en la experiencia real de despliegue. Incluye los pr
 | Node.js | `node --version` | v18+ (probado con v20.20.2) |
 | Docker | `docker --version` | Cualquier versión reciente |
 | Docker Compose v2 | `docker compose version` | v2+ |
-| SMB montado | `ls /mnt/trabajos/` | Debe mostrar `1ACTIVOS/` y `TERMINADOS/` |
+| SMB montado en `/mnt/trabajos` | `ls /mnt/trabajos/` | Debe mostrar `1ACTIVOS/` y `TERMINADOS/` |
+| SMB en `/etc/fstab` con `nofail` | `grep trabajos /etc/fstab` | Auto-montaje tras reboot |
 | Acceso SSH | — | Key-only recomendado |
+| Repo clonado en `/home/admin/incorutas-photo-sync` | `ls /home/admin/incorutas-photo-sync/package.json` | — |
 
 ---
 
 ## Paso 1: Instalar Docker y Docker Compose
 
-Si Docker no está instalado:
-
 ```bash
 sudo apt update
 sudo apt install -y docker.io
 sudo systemctl enable docker --now
-```
-
-Docker Compose v2 no viene incluido con `docker.io` en Ubuntu. Instalar por separado:
-
-```bash
 sudo apt install -y docker-compose-v2
 ```
 
@@ -41,29 +36,26 @@ docker compose version
 
 ---
 
-## Paso 2: Instalar dependencias del proyecto
+## Paso 2: Clonar el repo e instalar dependencias
 
 ```bash
 cd /home/admin/incorutas-photo-sync
-npm ci --omit=dev --ignore-scripts
+git pull origin main
+npm ci --omit=dev
 ```
 
-> **Nota:** `--ignore-scripts` es necesario porque el `package.json` tiene un script `prepare` que ejecuta `husky` (una devDependency). Sin `--ignore-scripts`, `npm ci --omit=dev` falla con `sh: 1: husky: not found`.
->
-> **Fix permanente pendiente:** Mover el script `prepare` fuera de `package.json` o condicionarlo a desarrollo.
+> El script `prepare` de `package.json` está fixeado (Sprint 1) — ya no necesita `--ignore-scripts`.
 
 ---
 
 ## Paso 3: Generar tokens seguros
-
-Generar 2 tokens aleatorios:
 
 ```bash
 openssl rand -hex 32    # API_TOKEN
 openssl rand -hex 24    # REDIS_PASSWORD
 ```
 
-Anotar los 2 valores. Se usarán en el siguiente paso.
+Anotar los 2 valores.
 
 ---
 
@@ -92,13 +84,13 @@ POLLING_ENABLED=true
 ENABLE_FOLDER_MOVE=false
 ```
 
-> `ENABLE_FOLDER_MOVE=false` inicialmente. Cambiar a `true` solo después de validar que las descargas funcionan correctamente.
+> `ENABLE_FOLDER_MOVE=false` inicialmente. Cambiar a `true` solo después de validar que las descargas funcionan.
+
+> **Nota:** `WEBHOOK_SECRET` NO es necesaria. El middleware usa polling, no webhooks. Si la tienes en el `.env` de una versión anterior, puedes eliminarla.
 
 ### Guardar y salir de nano
 
-- `Ctrl+O` → guarda
-- `Enter` → confirma el nombre
-- `Ctrl+X` → sale
+`Ctrl+O` → `Enter` → `Ctrl+X`
 
 ---
 
@@ -117,8 +109,6 @@ ls -la .env
 
 Debe mostrar `-rw-------` con owner `admin:admin`.
 
-> **Seguridad:** Solo el usuario del servicio puede leer el archivo. No usar root para correr el middleware si es posible.
-
 ---
 
 ## Paso 6: Arrancar Redis con Docker
@@ -127,7 +117,7 @@ Debe mostrar `-rw-------` con owner `admin:admin`.
 docker compose -f docker-compose.redis.yml up -d
 ```
 
-Verificar que está corriendo:
+Verificar:
 
 ```bash
 docker ps | grep redis
@@ -135,27 +125,11 @@ docker port incorutas-redis
 sudo ss -tlnp | grep 6379
 ```
 
-Debe mostrar el puerto mapeado: `6379/tcp -> 127.0.0.1:6379`.
+Debe mostrar: `6379/tcp -> 127.0.0.1:6379`.
 
 ### Problema: Puerto 6379 ocupado
 
-Si hay un Redis nativo ya instalado (por ejemplo, desde `apt install redis-server`), el contenedor Docker no podrá bindar el puerto.
-
-**Síntoma:**
-
-```
-Error response from daemon: failed to bind host port 127.0.0.1:6379/tcp: address already in use
-```
-
-**Diagnóstico:**
-
-```bash
-sudo lsof -i :6379
-# o
-sudo ss -tlnp | grep 6379
-```
-
-**Solución:** Parar y deshabilitar Redis nativo, luego reiniciar el contenedor:
+Si hay un Redis nativo instalado (`apt install redis-server`):
 
 ```bash
 sudo systemctl stop redis-server
@@ -166,18 +140,7 @@ docker compose -f docker-compose.redis.yml up -d
 
 ### Problema: Contenedor sin puertos mapeados
 
-Si el primer `docker compose up` falló (por conflicto de puerto), el contenedor puede quedar en estado inconsistente sin puertos mapeados aunque `docker ps` lo muestre como "Up".
-
-**Síntoma:**
-
-```bash
-docker port incorutas-redis
-# (sin output)
-docker inspect incorutas-redis --format '{{json .NetworkSettings.Ports}}'
-# {}
-```
-
-**Solución:** Recrear el contenedor desde cero:
+Si el primer `docker compose up` falló, el contenedor puede quedar inconsistente:
 
 ```bash
 docker compose -f docker-compose.redis.yml down
@@ -186,11 +149,16 @@ docker compose -f docker-compose.redis.yml up -d
 
 ---
 
-## Paso 7: Instalar PM2
+## Paso 7: Instalar PM2 y pm2-logrotate
 
 ```bash
 sudo npm install -g pm2
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:retain 7
 ```
+
+> `pm2-logrotate` rota los logs de PM2 automáticamente (Sprint 1). Sin esto, los logs crecen infinitamente.
 
 ---
 
@@ -207,7 +175,9 @@ pm2 status
 pm2 logs incorutas-photo-sync --lines 20
 ```
 
-El estado debe ser `online`. Si aparece `errored`, ver la sección de problemas conocidos abajo.
+El estado debe ser `online`.
+
+> **Nota sobre logs:** El `ecosystem.config.js` está configurado con `out_file: '/dev/null'` y `error_file: '/dev/null'` (Sprint 5). Los logs se gestionan exclusivamente vía Winston con rotación diaria en `logs/sync-YYYY-MM-DD.log`. Esto evita duplicación de logs entre PM2 y Winston.
 
 ---
 
@@ -217,9 +187,7 @@ El estado debe ser `online`. Si aparece `errored`, ver la sección de problemas 
 pm2 startup
 ```
 
-PM2 imprime un comando que empieza con `sudo env PATH=...`. Copiarlo y ejecutarlo.
-
-Después guardar la configuración actual:
+PM2 imprime un comando (`sudo env PATH=...`). Copiarlo y ejecutarlo.
 
 ```bash
 pm2 save
@@ -246,173 +214,48 @@ Respuesta esperada:
 }
 ```
 
-Todos los campos deben estar en verde (`true` / `ok`).
+---
+
+## Paso 11: Verificar auto-arranque tras reboot
+
+La cadena completa de auto-arranque es:
+
+```
+Servidor arranca
+  → systemd inicia Docker (enable docker)
+    → Docker inicia Redis (restart: unless-stopped)
+  → systemd inicia PM2 (pm2-root.service)
+    → PM2 restaura procesos (dump.pm2)
+      → Middleware arranca y conecta a Redis
+  → fstab monta SMB (nofail)
+    → Middleware puede escribir en /mnt/trabajos
+```
+
+Verificar que el SMB está en fstab:
+
+```bash
+grep trabajos /etc/fstab
+```
+
+Debe mostrar una línea con `cifs` y `nofail`. Si no, el SMB no se auto-monta y el middleware no podrá escribir fotos tras un reboot.
 
 ---
 
 ## Acceso al dashboard
 
-El dashboard no está expuesto al exterior. Para acceder desde tu PC:
+El dashboard no está expuesto al exterior. Acceder vía SSH tunnel:
 
 ```bash
 ssh -L 3000:localhost:3000 admin@<ip-del-server>
 ```
 
-Luego abrir `http://localhost:3000` en el navegador. Usar el `API_TOKEN` configurado en `.env` como contraseña de login.
+Abrir `http://localhost:3000` en el navegador. Usar el `API_TOKEN` del `.env` como login.
 
 La sesión SSH debe mantenerse abierta mientras se usa el dashboard.
 
 ---
 
-## Bugs encontrados durante el despliegue y sus fixes
-
-### Bug 1: WebSocket en Node.js 20
-
-**Síntoma:**
-
-```
-Error: Node.js 20 detected without native WebSocket support.
-Suggested solution: For Node.js < 22, install "ws" package and provide it via the transport option
-```
-
-**Causa:** El cliente de Supabase inicializa el módulo de realtime al crear la conexión, aunque el middleware use polling y no realtime. Node.js 20 no tiene WebSocket nativo (viene en Node 22+).
-
-**Fix:**
-
-1. Instalar el paquete `ws`:
-
-```bash
-npm install ws
-```
-
-2. Editar `src/services/supabase.js` y agregar `ws` como transport del cliente Supabase:
-
-```js
-const { createClient } = require('@supabase/supabase-js');
-const ws = require('ws');
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
-  auth: {
-    persistSession: false
-  },
-  realtime: {
-    transport: ws,
-    params: {
-      eventsPerSecond: 0
-    }
-  }
-});
-
-module.exports = { supabase };
-```
-
-### Bug 2: Dependencia circular `addPhotosCount`
-
-**Síntoma:**
-
-```
-Error: Cannot read properties of undefined (reading 'addPhotosCount')
-```
-
-El error aparece **después** de que cada job descarga exitosamente todas las fotos. Las fotos se guardan correctamente y el job se marca como descargado en Supabase, pero el job falla en BullMQ.
-
-**Causa:** Dependencia circular entre `bull-queue.js` y `downloader.js`:
-
-- `bull-queue.js` importa `downloader.js` (para `processJobApproved`)
-- `downloader.js` importa `bull-queue.js` (para `jobQueue.addPhotosCount()`)
-
-Node.js resuelve el ciclo dejando `jobQueue = undefined` en `downloader.js`.
-
-**Fix:** En `src/services/downloader.js`, reemplazar el import circular por `metricsTracker` (que no crea ciclo):
-
-Línea 9, cambiar:
-
-```js
-// Antes (crea dependencia circular)
-const { jobQueue } = require('../jobs/bull-queue');
-
-// Después (sin dependencia circular)
-const { metricsTracker } = require('../jobs/metrics-tracker');
-```
-
-Líneas 394 y 399, cambiar:
-
-```js
-// Antes
-jobQueue.addPhotosCount(downloadedCount);
-
-// Después
-metricsTracker.addPhotos(downloadedCount);
-```
-
-**Aplicar con sed en el servidor:**
-
-```bash
-cd /home/admin/incorutas-photo-sync
-sed -i "s|const { jobQueue } = require('../jobs/bull-queue');|const { metricsTracker } = require('../jobs/metrics-tracker');|" src/services/downloader.js
-sed -i 's|jobQueue\.addPhotosCount(downloadedCount)|metricsTracker.addPhotos(downloadedCount)|g' src/services/downloader.js
-pm2 restart incorutas-photo-sync
-```
-
-### Bug 3: Jobs quedan en estado "failed" después del fix
-
-**Síntoma:** Después de aplicar el fix del Bug 2, los jobs que fallaron antes quedan en estado "failed" en Redis. BullMQ no los reprocesa y el polling los salta con "ya existe en estado failed".
-
-**Causa:** Comportamiento esperado de BullMQ. Los jobs en estado "failed" no se reprocesan automáticamente. Para eso existe la DLQ (Dead-Letter Queue) con endpoints manuales.
-
-**Solución:** Limpiar la cola de Redis para que el polling re-enqueue los jobs frescos:
-
-```bash
-docker exec incorutas-redis redis-cli -a $(grep REDIS_PASSWORD .env | cut -d= -f2) FLUSHDB
-pm2 restart incorutas-photo-sync
-```
-
-> **Seguro:** Los jobs ya descargados no se re-procesan porque el polling consulta `WHERE downloaded_at IS NULL` en Supabase. Solo se re-enqueue los jobs que no se habían descargado.
-
----
-
-## Limpieza de cola de Redis (comando de referencia)
-
-```bash
-docker exec incorutas-redis redis-cli -a $(grep REDIS_PASSWORD .env | cut -d= -f2) FLUSHDB
-```
-
-Solo usar cuando sea necesario resetear la cola. No afecta los jobs ya descargados (la idempotencia se controla con `downloaded_at` en Supabase).
-
----
-
-## Comandos de administración
-
-| Acción | Comando |
-|---|---|
-| Ver estado | `pm2 status` |
-| Ver logs en vivo | `pm2 logs incorutas-photo-sync` |
-| Ver últimas N líneas | `pm2 logs incorutas-photo-sync --lines 50` |
-| Reiniciar | `pm2 restart incorutas-photo-sync` |
-| Detener | `pm2 stop incorutas-photo-sync` |
-| Eliminar proceso | `pm2 delete incorutas-photo-sync` |
-| Health check | `curl http://localhost:3000/health` |
-| Estado Redis | `docker ps \| grep redis` |
-| Logs Redis | `docker logs incorutas-redis --tail 20` |
-| Reiniciar Redis | `docker compose -f docker-compose.redis.yml restart` |
-| Limpiar cola | `docker exec incorutas-redis redis-cli -a <password> FLUSHDB` |
-
----
-
-## Pendientes de endurecimiento
-
-| Item | Prioridad | Descripción |
-|---|---|---|
-| Fix script `prepare`/`husky` | Media | Mover o condicionar el script `prepare` en `package.json` para que `npm ci --omit=dev` no falle sin `--ignore-scripts` |
-| systemd credentials | Media | Reemplazar `.env` plano por `LoadCredential=` en systemd. Las claves van a tmpfs (`/run/credentials/`), no persisten en disco |
-| Usuario no-root | Media | Correr el middleware como usuario dedicado, no como root |
-| Firewall (ufw) | Baja | Limitar todo a localhost excepto SSH |
-| Log rotation PM2 | Baja | Instalar `pm2-logrotate` para rotación automática de logs |
-| TLS Redis | Baja | Si Redis y el middleware están en hosts diferentes, habilitar TLS en la conexión |
-
----
-
-## Arquitectura de despliegue
+## Arquitectura
 
 ```
 Supabase (cloud)
@@ -421,26 +264,247 @@ Supabase (cloud)
   |
 Ubuntu Server
   ├── Node.js middleware (PM2, puerto 3000 localhost)
+  │    ├── Polling cada 30s → consulta Supabase
+  │    ├── BullMQ Worker → procesa jobs secuencialmente
+  │    ├── Auto-heal → re-descarga evidence con local_path IS NULL
+  │    ├── Disk monitor → alerta Telegram si disco baja
+  │    └── Dashboard → métricas, logs, DLQ, evidencias pendientes
   ├── Redis 7 (Docker, puerto 6379 localhost)
-  └── /mnt/trabajos (SMB mount de SRV-2019)
+  └── /mnt/trabajos (SMB mount de SRV-2019, auto-montado via fstab)
        ├── 1ACTIVOS/
-       │    ├── P260129 - .../FOTOS/FOTOS TERMINADO/*.jpg
-       │    ├── P251910 - .../FOTOS/FOTOS TERMINADO/*.jpg
-       │    └── ...
+       │    └── PXXXXXX - .../FOTOS/FOTOS TERMINADO/*.jpg
        └── TERMINADOS/
 ```
 
-No se necesitan puertos abiertos al exterior. El middleware hace llamadas salientes a Supabase cada 30 segundos (polling). El dashboard se accede vía SSH tunnel.
+Sin puertos abiertos al exterior. El middleware hace llamadas salientes a Supabase cada 30s.
 
 ---
 
 ## Flujo normal de operación
 
-1. **Polling** consulta Supabase cada 30s por jobs aprobados (`WHERE downloaded_at IS NULL`)
-2. Jobs encontrados se encolan en **BullMQ** (Redis)
-3. **Worker** procesa jobs secuencialmente (concurrency: 1)
-4. Cada job descarga fotos desde **Supabase Storage** a `/mnt/trabajos/1ACTIVOS/`
-5. Job se marca como `downloaded_at` en Supabase (idempotencia)
-6. Si un job falla, BullMQ reintenta automáticamente 3 veces con backoff exponencial
-7. Si las 3 fallan, el job va a la **DLQ** para revisión manual
-8. Métricas se persisten en `data/metrics.json` y se exponen en `/metrics` (formato Prometheus)
+1. **Polling** consulta Supabase cada 30s por jobs aprobados (`status IN ('approved','paid') AND downloaded_at IS NULL`)
+2. Jobs encontrados se encolan en **BullMQ** (Redis) con deduplicación por `jobId`
+3. **Worker** procesa jobs secuencialmente (concurrency: 1, rate limit 1/1000ms)
+4. **Lock distribuido** protege `processJobApproved` — dos instancias no pueden procesar el mismo job simultáneamente (Sprint 4)
+5. Cada job descarga fotos **y actas** (`type IN ('photo','signature')`) desde Supabase Storage a `/mnt/trabajos/1ACTIVOS/`
+6. Solo se descargan evidencias con `local_path IS NULL` (idempotencia a nivel foto — Sprint 2)
+7. `local_path` se actualiza en Supabase por cada evidencia. Si la BD falla, el job **no** se marca como descargado (Sprint 2)
+8. Job se marca como `downloaded_at` en Supabase solo si todas las evidencias se registraron correctamente
+9. Si un job falla, BullMQ reintenta 3 veces con backoff exponencial (2s → 4s → 8s)
+10. Si las 3 fallan, el job va a la **DLQ** para revisión manual
+11. **Auto-heal** (`pollStaleJobs`) busca jobs descargados con evidence pendiente y la re-descarga automáticamente (Sprint 3)
+12. **Disk monitor** revisa espacio cada 5 min y alerta por Telegram si está crítico o bajo (Sprint 4)
+13. Métricas se persisten en `data/metrics.json` y se exponen en `/metrics` (formato Prometheus)
+
+---
+
+## Evidencias: fotos y actas
+
+El middleware descarga **dos tipos** de evidencias:
+
+| Type | Descripción | Carpeta destino |
+|---|---|---|
+| `photo` | Fotos de evidencia | `FOTOS/FOTOS TERMINADO/` |
+| `signature` | Actas/firmas | `FOTOS/FOTOS TERMINADO/` (misma carpeta) |
+
+El dashboard muestra "Evidencias Pendientes" con distinción entre fotos y actas (ej: "3 fotos, 1 acta").
+
+---
+
+## Comandos de administración
+
+| Acción | Comando |
+|---|---|
+| Ver estado | `pm2 status` |
+| Ver logs Winston | `pm2 logs incorutas-photo-sync --lines 50` |
+| Ver logs filtrados | `pm2 logs incorutas-photo-sync --lines 200 --nostream \| grep -i "auto-heal\|polling\|error"` |
+| Reiniciar | `pm2 restart incorutas-photo-sync` |
+| Detener | `pm2 stop incorutas-photo-sync` |
+| Eliminar y recrear | `pm2 delete incorutas-photo-sync && pm2 start ecosystem.config.js --env production` |
+| Health check | `curl http://localhost:3000/health` |
+| Estado Redis | `docker ps \| grep redis` |
+| Logs Redis | `docker logs incorutas-redis --tail 20` |
+| Reiniciar Redis | `docker compose -f docker-compose.redis.yml restart` |
+| Limpiar cola Redis | `docker exec incorutas-redis redis-cli -a $(grep REDIS_PASSWORD .env \| cut -d= -f2) FLUSHDB` |
+| Guardar PM2 | `pm2 save` |
+
+> **Nota:** Al cambiar `ecosystem.config.js`, usar `pm2 delete` + `pm2 start` (no `restart`) para que PM2 relea la configuración.
+
+---
+
+## Actualizar el middleware a una nueva versión
+
+```bash
+cd /home/admin/incorutas-photo-sync
+git pull origin main
+npm ci --omit=dev
+pm2 restart incorutas-photo-sync
+```
+
+Si cambiaron archivos de configuración (`ecosystem.config.js`, `docker-compose.redis.yml`):
+
+```bash
+pm2 delete incorutas-photo-sync
+pm2 start ecosystem.config.js --env production
+pm2 save
+```
+
+---
+
+## Troubleshooting
+
+### El middleware no descarga nada
+
+1. Verificar health: `curl http://localhost:3000/health`
+2. Verificar Redis: `docker ps | grep redis`
+3. Verificar SMB: `ls /mnt/trabajos/1ACTIVOS/`
+4. Verificar logs: `pm2 logs incorutas-photo-sync --lines 200 --nostream | grep -i "polling\|error"`
+5. Si BullMQ tiene jobs en "failed": limpiar Redis con `FLUSHDB` y reiniciar
+
+### El dashboard muestra "En sesión: undefined"
+
+Esto era un bug ya fixeado (Sprint 1). Si aparece, el código del servidor está desactualizado:
+
+```bash
+cd /home/admin/incorutas-photo-sync
+git pull origin main
+pm2 restart incorutas-photo-sync
+```
+
+### Jobs aparecen como pendientes pero no se descargan
+
+El auto-heal procesa jobs con `downloaded_at` set y evidence con `local_path IS NULL`. Si los jobs no tienen `downloaded_at`, el polling normal los maneja via BullMQ.
+
+Verificar:
+
+```bash
+pm2 logs incorutas-photo-sync --lines 200 --nostream | grep -i "auto-heal\|polling"
+```
+
+### Fotos duplicadas en disco
+
+Esto era un bug ya fixeado (Sprint 2 — idempotencia a nivel foto). Si aparece, el código está desactualizado. Actualizar con `git pull`.
+
+### Redis no conecta
+
+```bash
+docker ps | grep redis
+docker port incorutas-redis
+sudo ss -tlnp | grep 6379
+```
+
+Si no hay puerto mapeado, recrear el contenedor:
+
+```bash
+docker compose -f docker-compose.redis.yml down
+docker compose -f docker-compose.redis.yml up -d
+```
+
+### Puerto 6379 ocupado por Redis nativo
+
+```bash
+sudo systemctl stop redis-server
+sudo systemctl disable redis-server
+docker compose -f docker-compose.redis.yml down
+docker compose -f docker-compose.redis.yml up -d
+```
+
+---
+
+## Auto-arranque tras reboot
+
+Todo está configurado para arrancar automáticamente tras un reboot o corte de luz:
+
+| Componente | Mecanismo | Verificación |
+|---|---|---|
+| Docker | `systemctl enable docker` | `systemctl is-enabled docker` |
+| Redis | `restart: unless-stopped` en Docker | `docker inspect incorutas-redis --format '{{.HostConfig.RestartPolicy.Name}}'` |
+| PM2 | `pm2-root.service` (systemd) | `systemctl is-enabled pm2-root` |
+| Middleware | `dump.pm2` restaurado por PM2 | `pm2 list` |
+| SMB mount | `/etc/fstab` con `nofail` | `grep trabajos /etc/fstab` |
+
+---
+
+## Seguridad
+
+| Medida | Estado | Notas |
+|---|---|---|
+| `.env` con `chmod 600` | ✅ Recomendado | Solo el usuario del servicio puede leerlo |
+| Bearer Token en `/api/*` | ✅ | `crypto.timingSafeEqual` — anti timing attacks |
+| Helmet (cabeceras HTTP) | ✅ | Activado por defecto |
+| Rate limiter por IP | ✅ | En endpoints públicos |
+| Sanitización de filenames | ✅ | Anti Path Traversal |
+| Sin puertos abiertos | ✅ | Polling saliente, SSH tunnel para dashboard |
+| `service_role` key | ⚠️ En `.env` plano | Solo accesible via `process.env` en `supabase.js` |
+
+### Endurecimiento pendiente (no urgente)
+
+| Item | Descripción |
+|---|---|
+| systemd credentials | Reemplazar `.env` por `LoadCredential=` — claves en tmpfs, no en disco |
+| Usuario no-root | Correr el middleware como usuario dedicado |
+| Firewall (ufw) | Limitar todo a localhost excepto SSH |
+| TLS Redis | Si Redis y middleware están en hosts diferentes |
+
+---
+
+## Monitoreo
+
+### Prometheus
+
+`GET /metrics` expone métricas en formato Prometheus text (sin autenticación, para scrapeo):
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'incorutas-photo-sync'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: '/metrics'
+```
+
+### Alertas Telegram (opcional)
+
+Configurar `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en `.env` para recibir:
+
+- **Disco crítico** — cuando el espacio es menor a `MIN_DISK_MB`
+- **Disco bajo** — cuando el espacio es menor a 2x `MIN_DISK_MB` (aviso temprano)
+- **Job fallido** — cuando un job agota todos los reintentos
+- **Polling fallido** — cuando el polling falla 3 veces consecutivas
+- **SMB desmontado** — cuando no se puede acceder a la ruta base
+
+> El disk monitor revisa cada 5 minutos (Sprint 4) y envía alertas con cooldown de 10 minutos para no spamear.
+
+---
+
+## Cambios aplicados (Sprints 1-5)
+
+### Sprint 1: Quick wins
+- Fix script `prepare`/`husky` — `npm ci --omit=dev` ya no necesita `--ignore-scripts`
+- Eliminado `WEBHOOK_SECRET` de la documentación (no se usa con polling)
+- Instalación de `pm2-logrotate`
+
+### Sprint 2: Race condition + dashboard
+- Eliminado `processJobApproved` directo de `pollStaleJobs` — solo `retryFailedEvidences` para jobs con `downloaded_at`
+- `pollStaleJobs` actualiza métricas (`metricsTracker.addPhotos`)
+- Fix `dashboardFetchInProgress` stuck con `try/finally`
+- Idempotencia a nivel foto — no descarga fotos que ya tienen `local_path` set
+- `updateEvidenceLocalPath` retorna `true/false` en lugar de tragar errores
+- Jobs no se marcan como `downloaded_at` si hay fallos de BD
+
+### Sprint 3: Auto-heal reliability
+- `pollStaleJobs` consulta jobs primero (con filtro de status), luego evidence de esos jobs
+- Evita que evidence huérfana de jobs rejected/cancelled llene el LIMIT y ciegue el auto-heal
+
+### Sprint 4: Monitoring & hardening
+- Monitor de disco proactivo cada 5 min con alerta Telegram
+- Alerta temprana de disco (2x threshold)
+- Lock distribuido en `processJobApproved` — previene procesamiento duplicado
+- Logging en catch blocks silenciados
+- Disk check timeout no cuenta como `errorCount`
+
+### Sprint 5: Cleanup
+- Cleanup periódico de Maps en lock providers
+- PM2 logs a `/dev/null` — Winston gestiona todos los logs con rotación diaria
+- Tests para `pollStaleJobs` (4 tests nuevos, total 231)
