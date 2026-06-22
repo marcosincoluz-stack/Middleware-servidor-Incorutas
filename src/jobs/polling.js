@@ -188,19 +188,19 @@ async function pollStaleJobs() {
   let healed = 0;
 
   for (const job of staleJobs) {
+    if (!job.downloaded_at) {
+      logger.debug(`[Polling] Auto-heal: Job ${job.id} sin downloaded_at. Lo maneja pollApprovedJobs via BullMQ.`);
+      continue;
+    }
+
     try {
-      if (job.downloaded_at) {
-        const { retryFailedEvidences } = require('../services/downloader');
-        logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
-        const result = await retryFailedEvidences(job.id);
-        if (result.succeeded > 0) {
-          healed++;
-        }
-      } else {
-        const { processJobApproved } = require('../services/downloader');
-        logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") sin downloaded_at. Procesando descarga completa...`);
-        await processJobApproved(job.id, job.title);
+      const { retryFailedEvidences } = require('../services/downloader');
+      logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
+      const result = await retryFailedEvidences(job.id);
+      if (result.succeeded > 0) {
         healed++;
+        const { metricsTracker } = require('./metrics-tracker');
+        metricsTracker.addPhotos(result.succeeded);
       }
     } catch (err) {
       logger.error(`[Polling] Auto-heal falló para Job ${job.id}: ${err.message}`);

@@ -68,50 +68,53 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
     supabaseOk = false;
   }
 
-  const queue = await jobQueue.getStatus();
-  const mem = process.memoryUsage();
-  const isHealthy = smbMounted && supabaseOk && (!diskInfo || diskInfo.isSafe);
+  try {
+    const queue = await jobQueue.getStatus();
+    const mem = process.memoryUsage();
+    const isHealthy = smbMounted && supabaseOk && (!diskInfo || diskInfo.isSafe);
 
-  const data = {
-    status: isHealthy ? 'ok' : 'degraded',
-    health: {
-      smb: smbMounted,
-      supabase: supabaseOk,
-      disk: diskInfo,
-      minDiskMB: config.MIN_DISK_MB
-    },
-    queue: {
-      isProcessing: queue.isProcessing,
-      pendingCount: queue.pendingCount,
-      totalProcessed: queue.totalProcessed,
-      totalErrors: queue.totalErrors,
-      totalPhotos: queue.totalPhotos,
-      sessionProcessed: queue.sessionProcessed,
-      sessionErrors: queue.sessionErrors,
-      sessionPhotos: queue.sessionPhotos,
-      currentJob: queue.currentJob,
-      currentJobStartedAt: queue.currentJobStartedAt,
-      lastJobProcessed: queue.lastJobProcessed,
-      lastProcessedAt: queue.lastProcessedAt,
-      recentJobs: queue.recentJobs
-    },
-    process: {
-      uptime: process.uptime(),
-      memoryMB: parseFloat((mem.rss / 1024 / 1024).toFixed(1)),
-      startedAt: queue.startedAt,
-      version: pkg.version
-    },
-    config: {
-      devMode: config.IS_DEV_MODE,
-      folderMove: config.ENABLE_FOLDER_MOVE,
-      telegram: config.HAS_TELEGRAM,
-      smbPath: config.TRABAJOS_BASE_PATH
-    }
-  };
+    const data = {
+      status: isHealthy ? 'ok' : 'degraded',
+      health: {
+        smb: smbMounted,
+        supabase: supabaseOk,
+        disk: diskInfo,
+        minDiskMB: config.MIN_DISK_MB
+      },
+      queue: {
+        isProcessing: queue.isProcessing,
+        pendingCount: queue.pendingCount,
+        totalProcessed: queue.totalProcessed,
+        totalErrors: queue.totalErrors,
+        totalPhotos: queue.totalPhotos,
+        sessionProcessed: queue.sessionProcessed,
+        sessionErrors: queue.sessionErrors,
+        sessionPhotos: queue.sessionPhotos,
+        currentJob: queue.currentJob,
+        currentJobStartedAt: queue.currentJobStartedAt,
+        lastJobProcessed: queue.lastJobProcessed,
+        lastProcessedAt: queue.lastProcessedAt,
+        recentJobs: queue.recentJobs
+      },
+      process: {
+        uptime: process.uptime(),
+        memoryMB: parseFloat((mem.rss / 1024 / 1024).toFixed(1)),
+        startedAt: queue.startedAt,
+        version: pkg.version
+      },
+      config: {
+        devMode: config.IS_DEV_MODE,
+        folderMove: config.ENABLE_FOLDER_MOVE,
+        telegram: config.HAS_TELEGRAM,
+        smbPath: config.TRABAJOS_BASE_PATH
+      }
+    };
 
-  dashboardCache = { data, timestamp: now };
-  dashboardFetchInProgress = false;
-  res.json(data);
+    dashboardCache = { data, timestamp: now };
+    res.json(data);
+  } finally {
+    dashboardFetchInProgress = false;
+  }
 }));
 
 router.get('/config', asyncHandler(async (req, res) => {
