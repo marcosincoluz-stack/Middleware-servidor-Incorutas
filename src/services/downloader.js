@@ -90,7 +90,8 @@ async function cleanupOrphanedPartFiles() {
     let entries;
     try {
       entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      logger.debug(`[Cleanup] No se pudo leer directorio "${dirPath}": ${err.message}`);
       return;
     }
     for (const entry of entries) {
@@ -102,8 +103,8 @@ async function cleanupOrphanedPartFiles() {
           await fs.promises.unlink(fullPath);
           cleaned++;
           logger.info(`[Cleanup] Eliminado .part huérfano: "${fullPath}"`);
-        } catch {
-          // Ignore
+        } catch (err) {
+          logger.debug(`[Cleanup] No se pudo eliminar .part huérfano "${fullPath}": ${err.message}`);
         }
       }
     }
@@ -281,6 +282,24 @@ async function markJobAsDownloaded(jobId) {
 async function processJobApproved(jobId, jobTitle) {
   logger.info(`[Downloader] Iniciando procesamiento de Job ${jobId} ("${jobTitle}")`);
 
+  const jobLockKey = `job:${jobId}`;
+  try {
+    await lockProvider.acquire(jobLockKey, 120000);
+  } catch (err) {
+    logger.info(`[Downloader] Job ${jobId} ya está siendo procesado por otra instancia (${err.message}). Omitiendo.`);
+    return { skipped: true, reason: 'lock_contention' };
+  }
+
+  try {
+    return await _processJobApprovedInternal(jobId, jobTitle);
+  } finally {
+    await lockProvider.release(jobLockKey);
+  }
+}
+
+async function _processJobApprovedInternal(jobId, jobTitle) {
+  logger.info(`[Downloader] Iniciando procesamiento de Job ${jobId} ("${jobTitle}")`);
+
   // 1. Comprobar Idempotencia: Verificar si ya ha sido descargado previamente
   try {
     const { data: job, error: jobError } = await withTimeout(
@@ -366,9 +385,12 @@ async function processJobApproved(jobId, jobTitle) {
           throw new Error(`Disco lleno durante descarga. Libre: ${disk.freeMB.toFixed(2)} MB`);
         }
       } catch (err) {
-        logger.error(`[Downloader] Disk check mid-loop falló para Job ${jobId}: ${err.message}`);
-        errorCount++;
-        break;
+        if (err.message.includes('Disco lleno')) {
+          logger.error(`[Downloader] Disco lleno durante descarga de Job ${jobId}: ${err.message}`);
+          errorCount++;
+          break;
+        }
+        logger.warn(`[Downloader] Disk check mid-loop falló para Job ${jobId} (no fatal): ${err.message}`);
       }
     }
 

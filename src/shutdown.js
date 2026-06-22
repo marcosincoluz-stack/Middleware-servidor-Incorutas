@@ -2,6 +2,7 @@ const { logger } = require('./utils/logger');
 const { jobQueue } = require('./jobs/bull-queue');
 const { metricsStore } = require('./utils/metrics-store');
 const { stopPolling } = require('./jobs/polling');
+const { stopDiskMonitor } = require('./index');
 
 const HTTP_DRAIN_GRACE_MS = 2000;
 const FORCE_EXIT_TIMEOUT_MS = 35000;
@@ -45,6 +46,12 @@ async function shutdownResources() {
     stopPolling();
   } catch (err) {
     logger.error('Error deteniendo polling:', err.message);
+  }
+
+  try {
+    stopDiskMonitor();
+  } catch (err) {
+    logger.error('Error deteniendo disk monitor:', err.message);
   }
 
   let checks = 0;

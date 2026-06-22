@@ -107,6 +107,23 @@ const notify = {
   },
 
   /**
+   * Alerta temprana cuando el espacio en disco se acerca al umbral crítico.
+   * @param {number} freeMB Megabytes libres en disco
+   * @param {number} requiredMB Megabytes mínimos requeridos
+   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
+   */
+  async alertDiskWarning(freeMB, requiredMB) {
+    const icon = '⚠️';
+    const text = `${icon} <b>[AVISO] ESPACIO EN DISCO BAJO</b>\n\n` +
+      `<b>Servidor:</b> Incorutas Photo Sync\n` +
+      `<b>Estado:</b> El espacio se está acercando al umbral crítico\n` +
+      `<b>Espacio libre:</b> <code>${parseFloat(freeMB).toFixed(2)} MB</code>\n` +
+      `<b>Mínimo requerido:</b> <code>${requiredMB} MB</code>\n\n` +
+      `<i>Las descargas siguen funcionando, pero se recomienda liberar espacio pronto.</i>`;
+    return sendTelegramNotification(text);
+  },
+
+  /**
    * Alerta cuando el storage/SMB no está montado.
    * @param {string} path Ruta esperada del almacenamiento SMB
    * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
