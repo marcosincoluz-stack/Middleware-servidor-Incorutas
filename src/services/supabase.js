@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 
 /**
  * Cliente singleton de Supabase con service_role key.
@@ -10,6 +11,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
     persistSession: false
   },
   realtime: {
+    transport: ws,
     params: {
       eventsPerSecond: 0
     }

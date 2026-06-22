@@ -6,7 +6,7 @@ const { logger } = require('../utils/logger');
 const { sanitizeFilename, ensurePathWithinBase } = require('../utils/sanitize');
 const { checkDiskSpace } = require('../utils/disk');
 const { createLockProvider } = require('../utils/lock');
-const { jobQueue } = require('../jobs/bull-queue');
+const { metricsTracker } = require('../jobs/metrics-tracker');
 const { getRedisConnection } = require('../utils/redis-connection');
 
 const lockProvider = (function createProvider() {
@@ -248,8 +248,10 @@ async function updateEvidenceLocalPath(evidenceId, localPath) {
 
     if (error) throw error;
     logger.debug(`local_path actualizado en BD para evidencia ${evidenceId}`);
+    return true;
   } catch (err) {
     logger.error(`Error al actualizar local_path de evidencia ${evidenceId} en la base de datos:`, err.message);
+    return false;
   }
 }
 
@@ -316,6 +318,7 @@ async function processJobApproved(jobId, jobTitle) {
         .select('id, url, type')
         .eq('job_id', jobId)
         .eq('type', 'photo')
+        .is('local_path', null)
         .limit(config.MAX_EVIDENCES_PER_JOB)
     );
 
@@ -346,6 +349,7 @@ async function processJobApproved(jobId, jobTitle) {
   let downloadedCount = 0;
   const skippedCount = 0;
   let errorCount = 0;
+  let dbFailures = 0;
 
   for (const ev of evidences) {
     const storagePath = getStoragePath(ev.url);
@@ -376,27 +380,36 @@ async function processJobApproved(jobId, jobTitle) {
       ensurePathWithinBase(destFilePath, targetFolder);
 
       await downloadFileWithRetry(storagePath, destFilePath);
-      await updateEvidenceLocalPath(ev.id, destFilePath);
-      downloadedCount++;
+      const dbOk = await updateEvidenceLocalPath(ev.id, destFilePath);
+      if (dbOk) {
+        downloadedCount++;
+      } else {
+        dbFailures++;
+        errorCount++;
+      }
     } catch (err) {
       logger.error(`[Downloader] Error descargando evidencia ${ev.id} (${storagePath}):`, err.message);
       errorCount++;
     }
   }
 
-  logger.info(`[Downloader] Resumen de descargas para Job ${jobId}: Exitosas: ${downloadedCount}, Omitidas: ${skippedCount}, Errores: ${errorCount}`);
+  logger.info(`[Downloader] Resumen de descargas para Job ${jobId}: Exitosas: ${downloadedCount}, Omitidas: ${skippedCount}, Errores: ${errorCount}, DB failures: ${dbFailures}`);
 
   // 6. Marcar el job como descargado según tolerancia
   const tolerance = Math.ceil(evidences.length * (config.DOWNLOAD_TOLERANCE_PERCENT / 100));
 
   if (errorCount === 0) {
     await markJobAsDownloaded(jobId);
-    jobQueue.addPhotosCount(downloadedCount);
+    metricsTracker.addPhotos(downloadedCount);
     return { downloaded: downloadedCount, skipped: skippedCount };
   } else if (errorCount <= tolerance) {
+    if (dbFailures > 0) {
+      logger.warn(`[Downloader] Job ${jobId}: ${dbFailures} fallos de BD al registrar local_path. No se marcará como descargado. El polling re-procesará las fotos pendientes.`);
+      throw new Error(`${dbFailures} fotos no se pudieron registrar en la base de datos (local_path). Reintento pendiente.`);
+    }
     logger.warn(`[Downloader] Job ${jobId}: ${errorCount} fotos fallidas dentro de tolerancia (${tolerance}). Marcando como descargado con advertencias.`);
     await markJobAsDownloaded(jobId);
-    jobQueue.addPhotosCount(downloadedCount);
+    metricsTracker.addPhotos(downloadedCount);
     return { downloaded: downloadedCount, skipped: skippedCount, errors: errorCount };
   } else {
     logger.warn(`[Downloader] Sincronización del Job ${jobId} incompleta: ${errorCount} fotos fallidas de ${evidences.length} (tolerancia: ${tolerance}). No se marcará como descargado.`);
@@ -489,6 +502,11 @@ async function retryFailedEvidences(jobId) {
   }
 
   logger.info(`[RetryFailed] Resumen para Job ${jobId}: Reintentadas: ${failedEvidences.length}, Exitosas: ${succeeded}, Aun fallidas: ${stillFailed}`);
+
+  if (succeeded > 0) {
+    metricsTracker.addPhotos(succeeded);
+  }
+
   return { retried: failedEvidences.length, succeeded, stillFailed };
 }
 

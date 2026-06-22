@@ -41,9 +41,14 @@ const mockJobQueue = {
   addPhotosCount: vi.fn()
 };
 
+const mockMetricsTracker = {
+  addPhotos: vi.fn()
+};
+
 injectMock('../../src/services/supabase', { supabase: mockSupabase });
 injectMock('../../src/utils/disk', { checkDiskSpace: mockCheckDiskSpace });
 injectMock('../../src/jobs/bull-queue', { jobQueue: mockJobQueue });
+injectMock('../../src/jobs/metrics-tracker', { metricsTracker: mockMetricsTracker });
 injectMock('../../src/utils/redis-connection', { connection: {}, getRedisConnection: vi.fn() });
 
 const clearDownloaderCache = () => {
@@ -74,6 +79,7 @@ describe('downloader service', () => {
     mockDownload.mockReset();
     mockCheckDiskSpace.mockReset();
     mockJobQueue.addPhotosCount.mockReset();
+    mockMetricsTracker.addPhotos.mockReset();
   });
 
   describe('getStoragePath', () => {
@@ -159,7 +165,8 @@ describe('downloader service', () => {
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
 
       const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
-      const mockEqEvType = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqEvType = vi.fn().mockReturnValue({ is: mockIs });
       const mockEqEvId = vi.fn().mockReturnValue({ eq: mockEqEvType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqEvId });
 
@@ -187,7 +194,8 @@ describe('downloader service', () => {
         data: [{ id: 'ev-1', url: 'photo.jpg', type: 'photo' }],
         error: null
       });
-      const mockEqType = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
       const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
@@ -213,7 +221,8 @@ describe('downloader service', () => {
         { id: 'ev-2', url: '', type: 'photo' },
       ];
       const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
-      const mockEqType = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
       const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
@@ -260,7 +269,8 @@ describe('downloader service', () => {
         { id: 'ev-1', url: '', type: 'photo' },
       ];
       const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
-      const mockEqType = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
       const mockEqId = vi.fn().mockReturnValue({ eq: mockEqType });
       const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
 
@@ -436,6 +446,7 @@ describe('downloader service', () => {
       expect(result.succeeded).toBe(1);
       expect(result.stillFailed).toBe(0);
       expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMetricsTracker.addPhotos).toHaveBeenCalledWith(1);
     });
 
     it('debería contar stillFailed si la foto sigue fallando', async () => {
@@ -534,7 +545,7 @@ describe('downloader service', () => {
       await retryFailedEvidences('job-1');
 
       expect(jobsUpdateCalled).toBe(false);
-      expect(mockJobQueue.addPhotosCount).not.toHaveBeenCalled();
+      expect(mockMetricsTracker.addPhotos).toHaveBeenCalledWith(1);
     });
   });
 

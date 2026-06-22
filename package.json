@@ -23,6 +23,7 @@
     "ioredis": "^5.11.1",
     "winston": "^3.13.0",
     "winston-daily-rotate-file": "^5.0.0",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "lint-staged": {
