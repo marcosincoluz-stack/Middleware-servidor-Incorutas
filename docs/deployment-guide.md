@@ -56,15 +56,14 @@ npm ci --omit=dev --ignore-scripts
 
 ## Paso 3: Generar tokens seguros
 
-Generar 3 tokens aleatorios:
+Generar 2 tokens aleatorios:
 
 ```bash
 openssl rand -hex 32    # API_TOKEN
-openssl rand -hex 32    # WEBHOOK_SECRET
 openssl rand -hex 24    # REDIS_PASSWORD
 ```
 
-Anotar los 3 valores. Se usarán en el siguiente paso.
+Anotar los 2 valores. Se usarán en el siguiente paso.
 
 ---
 
@@ -81,7 +80,6 @@ nano .env
 |---|---|
 | `SUPABASE_URL` | URL real del proyecto Supabase |
 | `SUPABASE_SERVICE_KEY` | Service role key de Supabase |
-| `WEBHOOK_SECRET` | Token generado en el paso 3 (**no existe en `.env.example`, hay que agregarlo manualmente**) |
 | `API_TOKEN` | Token generado en el paso 3 |
 | `REDIS_PASSWORD` | Token generado en el paso 3 |
 | `TRABAJOS_BASE_PATH` | `/mnt/trabajos` (ruta del SMB montado) |

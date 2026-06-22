@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/ tests/",
-    "prepare": "husky"
+    "prepare": "node -e \"try{require('husky')}catch{}\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
