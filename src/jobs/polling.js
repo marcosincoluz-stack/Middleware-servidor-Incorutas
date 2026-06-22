@@ -160,7 +160,7 @@ async function pollStaleJobs() {
       .select('job_id')
       .in('type', ['photo', 'signature'])
       .is('local_path', null)
-      .limit(50)
+      .limit(500)
   );
 
   if (error) throw error;
