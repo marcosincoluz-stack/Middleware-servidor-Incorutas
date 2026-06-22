@@ -10,6 +10,8 @@ const mockSupabase = {
 
 const mockEnqueue = vi.fn();
 const mockGetPendingCount = vi.fn();
+const mockRetryFailedEvidences = vi.fn();
+const mockAddPhotos = vi.fn();
 
 const injectMock = (modulePath, exportsObject) => {
   const resolved = require.resolve(modulePath);
@@ -36,6 +38,8 @@ injectMock('../../src/jobs/bull-queue', { jobQueue: { enqueue: mockEnqueue, getP
 injectMock('../../src/utils/logger', {
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 });
+injectMock('../../src/jobs/metrics-tracker', { metricsTracker: { addPhotos: mockAddPhotos } });
+injectMock('../../src/services/downloader', { retryFailedEvidences: mockRetryFailedEvidences });
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'polling-test-'));
 injectMock('../../src/config', {
@@ -56,7 +60,7 @@ const clearCache = (pattern) => {
 };
 clearCache('polling');
 
-const { pollApprovedJobs, pollPaidJobs } = require('../../src/jobs/polling');
+const { pollApprovedJobs, pollPaidJobs, pollStaleJobs } = require('../../src/jobs/polling');
 
 describe('polling module', () => {
   let activosDir;
@@ -66,6 +70,8 @@ describe('polling module', () => {
     mockFrom.mockReset();
     mockEnqueue.mockReset();
     mockGetPendingCount.mockReset();
+    mockRetryFailedEvidences.mockReset();
+    mockAddPhotos.mockReset();
 
     activosDir = path.join(tmpDir, '1ACTIVOS');
     fs.rmSync(activosDir, { recursive: true, force: true });
@@ -309,6 +315,120 @@ describe('polling module', () => {
       await new Promise(r => setTimeout(r, 50));
 
       expect(true).toBe(true);
+    });
+  });
+
+  describe('pollStaleJobs', () => {
+    it('debería retornar ceros si no hay jobs descargados', async () => {
+      const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockNot = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockIn = vi.fn().mockReturnValue({ not: mockNot });
+      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const result = await pollStaleJobs();
+
+      expect(result.found).toBe(0);
+      expect(result.healed).toBe(0);
+    });
+
+    it('debería curar jobs con evidence pendiente', async () => {
+      const jobs = [
+        { id: 'job-1', title: 'P260251 - Test', downloaded_at: '2026-06-15T10:00:00Z' },
+        { id: 'job-2', title: 'P260252 - Test2', downloaded_at: '2026-06-15T11:00:00Z' },
+      ];
+      const mockLimit = vi.fn().mockResolvedValue({ data: jobs, error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockNot = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockInJobs = vi.fn().mockReturnValue({ not: mockNot });
+      const mockSelectJobs = vi.fn().mockReturnValue({ in: mockInJobs });
+
+      const pendingEv = [
+        { job_id: 'job-1' },
+        { job_id: 'job-2' },
+      ];
+      const mockIs = vi.fn().mockResolvedValue({ data: pendingEv, error: null });
+      const mockInType = vi.fn().mockReturnValue({ is: mockIs });
+      const mockInJobIds = vi.fn().mockReturnValue({ in: mockInType });
+      const mockSelectEv = vi.fn().mockReturnValue({ in: mockInJobIds });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelectJobs };
+        if (table === 'evidence') return { select: mockSelectEv };
+      });
+
+      mockRetryFailedEvidences.mockResolvedValue({ retried: 1, succeeded: 1, stillFailed: 0 });
+
+      const result = await pollStaleJobs();
+
+      expect(result.found).toBe(2);
+      expect(result.healed).toBe(2);
+      expect(mockRetryFailedEvidences).toHaveBeenCalledTimes(2);
+      expect(mockAddPhotos).toHaveBeenCalledWith(1);
+    });
+
+    it('debería manejar errores de retryFailedEvidences sin romper el ciclo', async () => {
+      const jobs = [
+        { id: 'job-1', title: 'P260251 - Test', downloaded_at: '2026-06-15T10:00:00Z' },
+        { id: 'job-2', title: 'P260252 - Test2', downloaded_at: '2026-06-15T11:00:00Z' },
+      ];
+      const mockLimit = vi.fn().mockResolvedValue({ data: jobs, error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockNot = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockInJobs = vi.fn().mockReturnValue({ not: mockNot });
+      const mockSelectJobs = vi.fn().mockReturnValue({ in: mockInJobs });
+
+      const pendingEv = [
+        { job_id: 'job-1' },
+        { job_id: 'job-2' },
+      ];
+      const mockIs = vi.fn().mockResolvedValue({ data: pendingEv, error: null });
+      const mockInType = vi.fn().mockReturnValue({ is: mockIs });
+      const mockInJobIds = vi.fn().mockReturnValue({ in: mockInType });
+      const mockSelectEv = vi.fn().mockReturnValue({ in: mockInJobIds });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelectJobs };
+        if (table === 'evidence') return { select: mockSelectEv };
+      });
+
+      mockRetryFailedEvidences
+        .mockRejectedValueOnce(new Error('Storage error'))
+        .mockResolvedValueOnce({ retried: 1, succeeded: 1, stillFailed: 0 });
+
+      const result = await pollStaleJobs();
+
+      expect(result.found).toBe(2);
+      expect(result.healed).toBe(1);
+      expect(mockRetryFailedEvidences).toHaveBeenCalledTimes(2);
+    });
+
+    it('no debería llamar retryFailedEvidences si no hay evidence pendiente', async () => {
+      const jobs = [
+        { id: 'job-1', title: 'P260251 - Test', downloaded_at: '2026-06-15T10:00:00Z' },
+      ];
+      const mockLimit = vi.fn().mockResolvedValue({ data: jobs, error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockNot = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockInJobs = vi.fn().mockReturnValue({ not: mockNot });
+      const mockSelectJobs = vi.fn().mockReturnValue({ in: mockInJobs });
+
+      const mockIs = vi.fn().mockResolvedValue({ data: [], error: null });
+      const mockInType = vi.fn().mockReturnValue({ is: mockIs });
+      const mockInJobIds = vi.fn().mockReturnValue({ in: mockInType });
+      const mockSelectEv = vi.fn().mockReturnValue({ in: mockInJobIds });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelectJobs };
+        if (table === 'evidence') return { select: mockSelectEv };
+      });
+
+      const result = await pollStaleJobs();
+
+      expect(result.found).toBe(0);
+      expect(result.healed).toBe(0);
+      expect(mockRetryFailedEvidences).not.toHaveBeenCalled();
     });
   });
 });

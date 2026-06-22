@@ -6,6 +6,17 @@ const LOCK_PREFIX = 'lock:';
 class MemoryLockProvider {
   constructor() {
     this._locks = new Map();
+    this._cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this._locks) {
+        if (entry.expiresAt <= now) {
+          this._locks.delete(key);
+        }
+      }
+    }, 60000);
+    if (typeof this._cleanupTimer.unref === 'function') {
+      this._cleanupTimer.unref();
+    }
   }
 
   /**
@@ -52,6 +63,14 @@ class MemoryLockProvider {
       return false;
     }
     return true;
+  }
+
+  destroy() {
+    if (this._cleanupTimer) {
+      clearInterval(this._cleanupTimer);
+      this._cleanupTimer = null;
+    }
+    this._locks.clear();
   }
 }
 
@@ -126,6 +145,10 @@ class RedisLockProvider {
     const redisKey = `${LOCK_PREFIX}${key}`;
     const exists = await this._redis.exists(redisKey);
     return exists === 1;
+  }
+
+  destroy() {
+    this._owners.clear();
   }
 }
 
