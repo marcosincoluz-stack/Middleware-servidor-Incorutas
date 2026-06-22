@@ -143,24 +143,38 @@ async function pollPaidJobs() {
 }
 
 /**
- * Auto-healing: busca jobs ya marcados como descargados (downloaded_at NOT NULL)
- * que tengan fotos con local_path IS NULL, y re-intenta descargar esas fotos.
+ * Auto-healing: busca evidence con local_path IS NULL (fotos/actas pendientes),
+ * identifica los jobs correspondientes, y re-intenta descargar las evidencias faltantes.
  *
- * Procesa de a 10 jobs por ciclo para no saturar Supabase ni el disco.
+ * Consulta directamente la tabla evidence (no jobs) para garantizar que encuentra
+ * todos los jobs con pendientes, no solo los más recientes.
  *
  * @returns {Promise<{ found: number, healed: number }>}
  */
 async function pollStaleJobs() {
-  const { data: staleJobs, error } = await withTimeout(
+  const { data: pendingEvidence, error } = await withTimeout(
     supabase
-      .from('jobs')
-      .select('id, title, downloaded_at')
-      .not('downloaded_at', 'is', null)
-      .order('downloaded_at', { ascending: false })
-      .limit(10)
+      .from('evidence')
+      .select('job_id')
+      .in('type', ['photo', 'signature'])
+      .is('local_path', null)
+      .limit(50)
   );
 
   if (error) throw error;
+  if (!pendingEvidence || pendingEvidence.length === 0) {
+    return { found: 0, healed: 0 };
+  }
+
+  const staleJobIds = [...new Set(pendingEvidence.map(e => e.job_id))];
+
+  const { data: staleJobs, error: jobsError } = await supabase
+    .from('jobs')
+    .select('id, title, downloaded_at')
+    .in('id', staleJobIds)
+    .not('downloaded_at', 'is', null);
+
+  if (jobsError) throw jobsError;
   if (!staleJobs || staleJobs.length === 0) {
     return { found: 0, healed: 0 };
   }
@@ -169,35 +183,18 @@ async function pollStaleJobs() {
 
   for (const job of staleJobs) {
     try {
-      const { data: failedEvs, error: evError } = await supabase
-        .from('evidence')
-        .select('id')
-        .eq('job_id', job.id)
-        .in('type', ['photo', 'signature'])
-        .is('local_path', null)
-        .limit(1);
-
-      if (evError) {
-        logger.debug(`[Polling] Auto-heal: error consultando evidence para Job ${job.id}: ${evError.message}`);
-        continue;
-      }
-
-      if (failedEvs && failedEvs.length > 0) {
-        const { retryFailedEvidences } = require('../services/downloader');
-        logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene fotos pendientes. Reintentando...`);
-        const result = await retryFailedEvidences(job.id);
-        if (result.succeeded > 0) {
-          healed++;
-        }
+      const { retryFailedEvidences } = require('../services/downloader');
+      logger.info(`[Polling] Auto-heal: Job ${job.id} ("${job.title}") tiene evidencias pendientes. Reintentando...`);
+      const result = await retryFailedEvidences(job.id);
+      if (result.succeeded > 0) {
+        healed++;
       }
     } catch (err) {
       logger.error(`[Polling] Auto-heal falló para Job ${job.id}: ${err.message}`);
     }
   }
 
-  if (healed > 0) {
-    logger.info(`[Polling] Auto-heal: ${staleJobs.length} jobs revisados, ${healed} curados`);
-  }
+  logger.info(`[Polling] Auto-heal: ${staleJobs.length} jobs con evidencias pendientes, ${healed} curados`);
 
   return { found: staleJobs.length, healed };
 }
