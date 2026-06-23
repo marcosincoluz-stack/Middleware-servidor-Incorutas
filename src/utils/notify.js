@@ -29,6 +29,14 @@ function getHostname() {
   return escapeHtml(os.hostname());
 }
 
+function formatUptime(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m`;
+}
+
 function padLabel(label, width = 10) {
   return label.padEnd(width, ' ');
 }
@@ -198,17 +206,31 @@ const notify = {
     return sendTelegramNotification(text);
   },
 
-  async notifyStartup(port, mode, smbStatus) {
-    const redisOk = true;
+  async notifyStartup(port, mode, smbStatus, isAutoRestart = false) {
+    const fields = [
+      ['Puerto', `<code>${port}</code>`],
+      ['Modo', `<code>${mode}</code>`],
+      ['SMB', smbStatus ? '✅ Conectado' : '❌ Desconectado'],
+      ['Redis', '✅ Conectado'],
+      ['Versión', `<code>${config.NODE_ENV === 'production' ? 'v2.0.0' : 'dev'}</code>`]
+    ];
+    
+    if (isAutoRestart) {
+      fields.push(['Restart', '⚠️ Automático (crash detectado)']);
+    }
+    
+    const text = buildAlert('🟢', 'INICIO', fields);
+    return sendTelegramNotification(text);
+  },
+
+  async notifyShutdown(signal, uptimeSeconds) {
+    const uptimeStr = formatUptime(uptimeSeconds);
     const text = buildAlert(
-      '🟢',
-      'INICIO',
+      '🟠',
+      'APAGADO',
       [
-        ['Puerto', `<code>${port}</code>`],
-        ['Modo', `<code>${mode}</code>`],
-        ['SMB', smbStatus ? '✅ Conectado' : '❌ Desconectado'],
-        ['Redis', redisOk ? '✅ Conectado' : '❌ Desconectado'],
-        ['Versión', `<code>${config.NODE_ENV === 'production' ? 'v2.0.0' : 'dev'}</code>`]
+        ['Motivo', `<code>${signal}</code>`],
+        ['Uptime', uptimeStr]
       ]
     );
     return sendTelegramNotification(text);

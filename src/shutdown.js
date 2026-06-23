@@ -3,10 +3,16 @@ const { jobQueue } = require('./jobs/bull-queue');
 const { metricsStore } = require('./utils/metrics-store');
 const { stopPolling } = require('./jobs/polling');
 const { stopDiskMonitor } = require('./index');
+const notify = require('./utils/notify');
+const config = require('./config');
+const fs = require('fs');
+const path = require('path');
 
 const HTTP_DRAIN_GRACE_MS = 2000;
 const FORCE_EXIT_TIMEOUT_MS = 35000;
+const GRACEFUL_SHUTDOWN_FILE = path.join(__dirname, '../data/.last_graceful_shutdown');
 let isShuttingDown = false;
+let startTime = Date.now();
 
 /**
  * Manejo graceful de señales SIGTERM/SIGINT.
@@ -86,6 +92,27 @@ async function shutdownResources() {
     metricsStore.shutdown();
   } catch (err) {
     logger.error('Error durante el cierre de MetricsStore:', err);
+  }
+
+  // Enviar notificación de apagado a Telegram
+  if (config.HAS_TELEGRAM) {
+    try {
+      const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
+      await notify.notifyShutdown('SIGTERM', uptimeSeconds);
+    } catch (err) {
+      logger.error('Error enviando notificación de apagado a Telegram:', err.message);
+    }
+  }
+
+  // Escribir timestamp de apagado graceful para detección de auto-restart
+  try {
+    const dataDir = path.dirname(GRACEFUL_SHUTDOWN_FILE);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(GRACEFUL_SHUTDOWN_FILE, Date.now().toString(), 'utf8');
+  } catch (err) {
+    logger.error('Error escribiendo archivo de shutdown:', err.message);
   }
 
   logger.info('👋 Proceso finalizado.');

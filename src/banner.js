@@ -1,8 +1,26 @@
 const config = require('./config');
 const fs = require('fs');
+const path = require('path');
 const notify = require('./utils/notify');
 const { logger } = require('./utils/logger');
 const pkg = require('../package.json');
+
+const GRACEFUL_SHUTDOWN_FILE = path.join(__dirname, '../data/.last_graceful_shutdown');
+const RESTART_THRESHOLD_MS = 60000; // 60 seconds
+
+function isAutoRestart() {
+  try {
+    if (!fs.existsSync(GRACEFUL_SHUTDOWN_FILE)) {
+      return true; // No shutdown file = first start or crash
+    }
+    const content = fs.readFileSync(GRACEFUL_SHUTDOWN_FILE, 'utf8');
+    const timestamp = parseInt(content, 10);
+    const elapsed = Date.now() - timestamp;
+    return elapsed > RESTART_THRESHOLD_MS; // If too much time passed, it's a crash/restart
+  } catch {
+    return true; // Error reading file = assume crash
+  }
+}
 
 const BANNER = `
 \x1b[38;5;105m╔══════════════════════════════════════════════════════════════╗
@@ -33,10 +51,12 @@ function printBanner() {
 
   if (config.HAS_TELEGRAM) {
     const smbMounted = fs.existsSync(config.TRABAJOS_BASE_PATH);
+    const autoRestart = isAutoRestart();
     notify.notifyStartup(
       config.PORT,
       config.IS_DEV_MODE ? 'Desarrollo' : 'Producción',
-      smbMounted
+      smbMounted,
+      autoRestart
     ).catch(err => logger.error('Error al enviar notificación de inicio a Telegram:', err));
   }
 }
