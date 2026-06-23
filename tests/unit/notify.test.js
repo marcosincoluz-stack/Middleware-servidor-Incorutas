@@ -208,7 +208,7 @@ describe('notify module (con Telegram configurado)', () => {
 
     expect(mockRequestWrite).toHaveBeenCalled();
     const payload = JSON.parse(mockRequestWrite.mock.calls[0][0]);
-    expect(payload.text).toContain('ESPACIO EN DISCO');
+    expect(payload.text).toContain('DISCO CRÍTICO');
     expect(payload.text).toContain('100');
   });
 
@@ -286,7 +286,7 @@ describe('notify module (con Telegram configurado)', () => {
 
     expect(mockRequestWrite).toHaveBeenCalled();
     const payload = JSON.parse(mockRequestWrite.mock.calls[0][0]);
-    expect(payload.text).toContain('POLLING REPETIDO FALLIDO');
+    expect(payload.text).toContain('POLLING FALLIDO');
     expect(payload.text).toContain('approved');
     expect(payload.text).toContain('5');
     expect(payload.text).toContain('Connection refused');

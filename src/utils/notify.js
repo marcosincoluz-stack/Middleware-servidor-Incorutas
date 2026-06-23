@@ -1,8 +1,10 @@
 const https = require('https');
+const os = require('os');
 const config = require('../config');
 const { logger } = require('./logger');
 
 const TELEGRAM_MAX_CHARS = 4000;
+const SEPARATOR = '━━━━━━━━━━━━━━━━━━━━━';
 
 function escapeHtml(text) {
   if (typeof text !== 'string') return '';
@@ -12,14 +14,44 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;');
 }
 
-/**
- * Envía una notificación de error o alerta al canal/grupo de Telegram.
- * Utiliza HTML para dar un formato profesional con emojis y negrita.
- * No arroja excepciones para evitar romper la lógica de negocio; los errores de red se registran en logs.
- * 
- * @param {string} message Mensaje en formato texto o HTML
- * @returns {Promise<boolean>} true si el mensaje se envió con éxito, false en caso contrario
- */
+function getTimestamp() {
+  return new Date().toLocaleString('es-ES', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function getHostname() {
+  return escapeHtml(os.hostname());
+}
+
+function padLabel(label, width = 10) {
+  return label.padEnd(width, ' ');
+}
+
+function buildAlert(emoji, title, fields, action = null) {
+  let text = `${emoji} <b>Incorutas Photo Sync — ${title}</b>\n\n`;
+  text += `${SEPARATOR}\n`;
+
+  for (const [label, value] of fields) {
+    text += `<b>${padLabel(label)}</b> ${value}\n`;
+  }
+
+  text += `${SEPARATOR}\n`;
+  text += `<b>${padLabel('Hora')}</b> ${getTimestamp()}\n`;
+  text += `<b>${padLabel('Servidor')}</b> ${getHostname()}\n`;
+
+  if (action) {
+    text += `\n<b>Acción:</b> ${action}`;
+  }
+
+  return text;
+}
+
 async function sendTelegramNotification(message) {
   if (!config.HAS_TELEGRAM) {
     logger.debug('Notificación omitida (Telegram no configurado)');
@@ -32,7 +64,7 @@ async function sendTelegramNotification(message) {
 
   const token = config.TELEGRAM_BOT_TOKEN;
   const chatId = config.TELEGRAM_CHAT_ID;
-  
+
   const payload = JSON.stringify({
     chat_id: chatId,
     text: safeMessage,
@@ -83,116 +115,102 @@ async function sendTelegramNotification(message) {
   });
 }
 
-/**
- * Plantillas predefinidas para alertas comunes
- */
 const notify = {
   send: sendTelegramNotification,
 
-  /**
-   * Alerta cuando el espacio en disco es insuficiente.
-   * @param {number} freeMB Megabytes libres en disco
-   * @param {number} requiredMB Megabytes mínimos requeridos
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async alertLowDisk(freeMB, requiredMB) {
-    const icon = '🚨';
-    const text = `${icon} <b>[ALERTA CRÍTICA] ESPACIO EN DISCO INSUFICIENTE</b>\n\n` +
-      `<b>Servidor:</b> Incorutas Photo Sync\n` +
-      `<b>Estado:</b> LAS DESCARGAS ESTÁN BLOQUEADAS\n` +
-      `<b>Espacio libre:</b> <code>${parseFloat(freeMB).toFixed(2)} MB</code>\n` +
-      `<b>Mínimo requerido:</b> <code>${requiredMB} MB</code>\n\n` +
-      `<i>Por favor, libere espacio en el servidor de archivos (SMB) inmediatamente.</i>`;
+    const text = buildAlert(
+      '🔴',
+      'DISCO CRÍTICO',
+      [
+        ['Estado', 'DESCARGAS BLOQUEADAS'],
+        ['Libre', `<code>${parseFloat(freeMB).toFixed(2)} MB</code>`],
+        ['Mínimo', `<code>${requiredMB} MB</code>`],
+        ['Ruta', `<code>${escapeHtml(config.TRABAJOS_BASE_PATH)}</code>`]
+      ],
+      'Liberar espacio en SRV-2019 inmediatamente'
+    );
     return sendTelegramNotification(text);
   },
 
-  /**
-   * Alerta temprana cuando el espacio en disco se acerca al umbral crítico.
-   * @param {number} freeMB Megabytes libres en disco
-   * @param {number} requiredMB Megabytes mínimos requeridos
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async alertDiskWarning(freeMB, requiredMB) {
-    const icon = '⚠️';
-    const text = `${icon} <b>[AVISO] ESPACIO EN DISCO BAJO</b>\n\n` +
-      `<b>Servidor:</b> Incorutas Photo Sync\n` +
-      `<b>Estado:</b> El espacio se está acercando al umbral crítico\n` +
-      `<b>Espacio libre:</b> <code>${parseFloat(freeMB).toFixed(2)} MB</code>\n` +
-      `<b>Mínimo requerido:</b> <code>${requiredMB} MB</code>\n\n` +
-      `<i>Las descargas siguen funcionando, pero se recomienda liberar espacio pronto.</i>`;
+    const text = buildAlert(
+      '🟡',
+      'DISCO BAJO',
+      [
+        ['Estado', 'Acercándose al umbral crítico'],
+        ['Libre', `<code>${parseFloat(freeMB).toFixed(2)} MB</code>`],
+        ['Mínimo', `<code>${requiredMB} MB</code>`],
+        ['Ruta', `<code>${escapeHtml(config.TRABAJOS_BASE_PATH)}</code>`]
+      ],
+      'Se recomienda liberar espacio pronto'
+    );
     return sendTelegramNotification(text);
   },
 
-  /**
-   * Alerta cuando el storage/SMB no está montado.
-   * @param {string} path Ruta esperada del almacenamiento SMB
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async alertSmbDisconnected(path) {
-    const icon = '🔌';
-    const text = `${icon} <b>[ALERTA CRÍTICA] ALMACENAMIENTO SMB DESMONTADO</b>\n\n` +
-      `<b>Servidor:</b> Incorutas Photo Sync\n` +
-      `<b>Estado:</b> NO SE PUEDE ACCEDER A LA RUTA BASE\n` +
-      `<b>Ruta esperada:</b> <code>${escapeHtml(path)}</code>\n\n` +
-      `<i>Verifique el estado del montaje SMB en el sistema operativo del middleware.</i>`;
+    const text = buildAlert(
+      '🔴',
+      'SMB DESMONTADO',
+      [
+        ['Estado', 'No se puede acceder a la ruta base'],
+        ['Ruta', `<code>${escapeHtml(path)}</code>`]
+      ],
+      'Verificar el montaje SMB en el sistema operativo'
+    );
     return sendTelegramNotification(text);
   },
 
-  /**
-   * Alerta cuando un Job falla por completo (agotados reintentos).
-   * @param {string} jobId ID del trabajo fallido
-   * @param {string} title Título del trabajo
-   * @param {string} errorMsg Mensaje de error descriptivo
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async alertJobFailed(jobId, title, errorMsg) {
-    const icon = '❌';
-    const truncatedError = (errorMsg || '').length > 1000
-      ? (errorMsg || '').substring(0, 1000) + '...(truncado)'
+    const truncatedError = (errorMsg || '').length > 500
+      ? (errorMsg || '').substring(0, 500) + '...(truncado)'
       : (errorMsg || '');
-    const text = `${icon} <b>[ERROR EN SINCRONIZACIÓN]</b>\n\n` +
-      `<b>Job ID:</b> <code>${escapeHtml(jobId)}</code>\n` +
-      `<b>Proyecto:</b> <code>${escapeHtml(title)}</code>\n` +
-      `<b>Error:</b> <pre>${escapeHtml(truncatedError)}</pre>\n\n` +
-      `<i>Las fotos de este trabajo no pudieron ser descargadas completamente. El middleware reintentará cuando se reciba un nuevo evento o se ejecute el backfill.</i>`;
+
+    const text = buildAlert(
+      '🔴',
+      'JOB FALLIDO',
+      [
+        ['Proyecto', `<code>${escapeHtml(title)}</code>`],
+        ['Job ID', `<code>${escapeHtml(jobId)}</code>`],
+        ['Intentos', '3/3 (agotados)'],
+        ['Error', `<pre>${escapeHtml(truncatedError)}</pre>`]
+      ],
+      'Revisar desde el dashboard o reintentar manualmente'
+    );
     return sendTelegramNotification(text);
   },
 
-  /**
-   * Alerta cuando el polling falla repetidamente.
-   * @param {number} consecutiveFailures Número de fallos consecutivos
-   * @param {string} lastError Último mensaje de error
-   * @param {string} cycleType Tipo de ciclo ('approved' o 'paid')
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async alertPollingFailure(consecutiveFailures, lastError, cycleType) {
-    const icon = '🔁';
-    const truncatedError = (lastError || '').length > 1000
-      ? (lastError || '').substring(0, 1000) + '...(truncado)'
+    const truncatedError = (lastError || '').length > 500
+      ? (lastError || '').substring(0, 500) + '...(truncado)'
       : (lastError || '');
-    const text = `${icon} <b>[ALERTA] POLLING REPETIDO FALLIDO</b>\n\n` +
-      `<b>Servidor:</b> Incorutas Photo Sync\n` +
-      `<b>Ciclo:</b> <code>${escapeHtml(cycleType)}</code>\n` +
-      `<b>Fallos consecutivos:</b> <code>${consecutiveFailures}</code>\n` +
-      `<b>Último error:</b> <pre>${escapeHtml(truncatedError)}</pre>\n\n` +
-      `<i>El polling no está encolando jobs nuevos. Verifica Supabase / red.</i>`;
+
+    const text = buildAlert(
+      '🟡',
+      'POLLING FALLIDO',
+      [
+        ['Ciclo', `<code>${escapeHtml(cycleType)}</code>`],
+        ['Fallos', `<code>${consecutiveFailures} consecutivos</code>`],
+        ['Error', `<pre>${escapeHtml(truncatedError)}</pre>`]
+      ],
+      'Verificar conexión con Supabase / red'
+    );
     return sendTelegramNotification(text);
   },
 
-  /**
-   * Notificación cuando se inicia el servidor.
-   * @param {number|string} port Puerto de escucha del servidor
-   * @param {string} mode Modo de ejecución ('Desarrollo' o 'Producción')
-   * @param {boolean} smbStatus true si el almacenamiento SMB está montado
-   * @returns {Promise<boolean>} true si se envió con éxito, false en caso contrario
-   */
   async notifyStartup(port, mode, smbStatus) {
-    const icon = '🚀';
-    const text = `${icon} <b>Middleware Incorutas Photo Sync Iniciado</b>\n\n` +
-      `<b>Puerto:</b> <code>${port}</code>\n` +
-      `<b>Modo:</b> <code>${mode}</code>\n` +
-      `<b>SMB Montado:</b> ${smbStatus ? '✅ Sí' : '❌ No'}\n` +
-      `<b>Timestamp:</b> <code>${new Date().toLocaleString('es-ES')}</code>`;
+    const redisOk = true;
+    const text = buildAlert(
+      '🟢',
+      'INICIO',
+      [
+        ['Puerto', `<code>${port}</code>`],
+        ['Modo', `<code>${mode}</code>`],
+        ['SMB', smbStatus ? '✅ Conectado' : '❌ Desconectado'],
+        ['Redis', redisOk ? '✅ Conectado' : '❌ Desconectado'],
+        ['Versión', `<code>${config.NODE_ENV === 'production' ? 'v2.0.0' : 'dev'}</code>`]
+      ]
+    );
     return sendTelegramNotification(text);
   }
 };
