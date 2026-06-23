@@ -160,7 +160,14 @@ router.get('/logs', asyncHandler(async (req, res) => {
     }
 
     const latestFile = path.join(logDir, files[files.length - 1]);
-    const lines = await tailFile(latestFile, { maxLines: 60, maxBytes: config.LOG_TAIL_MAX_BYTES });
+    const allLines = await tailFile(latestFile, { maxLines: 500, maxBytes: config.LOG_TAIL_MAX_BYTES * 2 });
+    
+    const dashboardPatterns = ['GET /dashboard', 'GET /logs', 'GET /dlq', 'GET /failed-evidences'];
+    const filteredLines = allLines.filter(line => 
+      !dashboardPatterns.some(pattern => line.includes(pattern))
+    );
+    
+    const lines = filteredLines.slice(-200);
 
     const data = {
       file: files[files.length - 1],
