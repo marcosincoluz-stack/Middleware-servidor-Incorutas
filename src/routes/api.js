@@ -219,12 +219,15 @@ router.post('/test-telegram', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Telegram no está configurado en las variables de entorno.' });
   }
 
-  const ok = await notify.send(
-    `🔔 <b>[PRUEBA DE CONEXIÓN]</b>\n\n` +
-    `Se ha pulsado el botón de prueba desde el Dashboard Web.\n` +
-    `<b>Estado del canal:</b> ACTIVO ✅\n` +
-    `<b>Timestamp:</b> <code>${new Date().toLocaleString('es-ES')}</code>`
+  const text = notify.buildAlert(
+    '🔵',
+    'TEST DE CONEXIÓN',
+    [
+      ['Origen', 'Dashboard Web'],
+      ['Estado', 'Canal ACTIVO ✅']
+    ]
   );
+  const ok = await notify.send(text);
 
   if (ok) {
     res.json({ success: true, message: 'Mensaje de prueba enviado a Telegram con éxito.' });

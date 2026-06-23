@@ -215,4 +215,4 @@ const notify = {
   }
 };
 
-module.exports = notify;
+module.exports = { ...notify, buildAlert };
