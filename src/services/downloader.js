@@ -4,6 +4,7 @@ const config = require('../config');
 const { supabase } = require('./supabase');
 const { logger } = require('../utils/logger');
 const { sanitizeFilename, ensurePathWithinBase } = require('../utils/sanitize');
+const { isAllowedImageExtension } = require('../utils/image-validator');
 const { checkDiskSpace } = require('../utils/disk');
 const { createLockProvider } = require('../utils/lock');
 const { metricsTracker } = require('../jobs/metrics-tracker');
@@ -396,6 +397,13 @@ async function _processJobApprovedInternal(jobId, jobTitle) {
 
     const originalFilename = path.basename(storagePath);
     const safeFilename = sanitizeFilename(originalFilename);
+
+    if (!isAllowedImageExtension(safeFilename)) {
+      logger.warn(`[Downloader] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
+      errorCount++;
+      continue;
+    }
+
     const destFilePath = await resolveUniqueFilename(targetFolder, safeFilename);
 
     try {
@@ -509,6 +517,13 @@ async function retryFailedEvidences(jobId) {
 
     const originalFilename = path.basename(storagePath);
     const safeFilename = sanitizeFilename(originalFilename);
+
+    if (!isAllowedImageExtension(safeFilename)) {
+      logger.warn(`[RetryFailed] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
+      stillFailed++;
+      continue;
+    }
+
     const destFilePath = await resolveUniqueFilename(targetFolder, safeFilename);
 
     try {

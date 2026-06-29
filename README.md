@@ -83,6 +83,7 @@ Todas las variables se definen en `.env`. Ver `.env.example` para la lista compl
 | `REDIS_PASSWORD` | — | Contraseña de Redis (recomendado en producción) |
 | `TELEGRAM_BOT_TOKEN` | — | Bot de alertas |
 | `TELEGRAM_CHAT_ID` | — | Grupo de notificaciones |
+| `ALLOWED_IMAGE_EXTENSIONS` | `jpg,jpeg,png,...` | Extensiones de imagen permitidas (sin punto, separadas por coma) |
 
 ---
 

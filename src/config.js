@@ -126,6 +126,12 @@ const config = {
 
   // Health Check
   HEALTH_PING_TIMEOUT_MS: parseInt(process.env.HEALTH_PING_TIMEOUT_MS, 10) || 3000,
+
+  // Lista blanca de extensiones de imagen permitidas para descarga
+  ALLOWED_IMAGE_EXTENSIONS: (process.env.ALLOWED_IMAGE_EXTENSIONS || 'jpg,jpeg,png,webp,heic,heif,gif,bmp,tiff,tif')
+    .split(',')
+    .map(ext => `.${ext.trim().toLowerCase()}`)
+    .filter(ext => ext.length > 1),
 };
 
 // Verificar permisos del archivo .env en producción
