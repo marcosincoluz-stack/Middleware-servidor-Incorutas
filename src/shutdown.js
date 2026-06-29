@@ -12,7 +12,7 @@ const HTTP_DRAIN_GRACE_MS = 2000;
 const FORCE_EXIT_TIMEOUT_MS = 35000;
 const GRACEFUL_SHUTDOWN_FILE = path.join(__dirname, '../data/.last_graceful_shutdown');
 let isShuttingDown = false;
-let startTime = Date.now();
+const startTime = Date.now();
 
 /**
  * Manejo graceful de señales SIGTERM/SIGINT.
