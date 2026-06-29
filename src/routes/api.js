@@ -90,6 +90,7 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
         sessionProcessed: queue.sessionProcessed,
         sessionErrors: queue.sessionErrors,
         sessionPhotos: queue.sessionPhotos,
+        sessionRejectedByExtension: queue.sessionRejectedByExtension,
         currentJob: queue.currentJob,
         currentJobStartedAt: queue.currentJobStartedAt,
         lastJobProcessed: queue.lastJobProcessed,

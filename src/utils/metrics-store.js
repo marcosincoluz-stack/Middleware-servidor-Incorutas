@@ -19,7 +19,8 @@ class MetricsStore {
       startedAt: new Date().toISOString(),
       processed: 0,
       errors: 0,
-      photos: 0
+      photos: 0,
+      rejectedByExtension: 0
     };
 
     this.timer = null;
@@ -87,6 +88,12 @@ class MetricsStore {
     if (count > 0) {
       this.metrics.totalPhotos += count;
       this.session.photos += count;
+    }
+  }
+
+  addRejectedByExtension(count) {
+    if (count > 0) {
+      this.session.rejectedByExtension += count;
     }
   }
 

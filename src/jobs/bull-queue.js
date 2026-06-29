@@ -120,6 +120,10 @@ class BullJobQueue {
     metricsTracker.addPhotos(count);
   }
 
+  addRejectedExtensionCount(count) {
+    metricsTracker.addRejectedByExtension(count);
+  }
+
   /**
    * Cierra las conexiones de forma limpia (graceful shutdown).
    *

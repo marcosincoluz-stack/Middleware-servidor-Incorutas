@@ -10,6 +10,7 @@ class MetricsTracker {
     this.totalProcessed = 0;
     this.totalErrors = 0;
     this.totalPhotos = 0;
+    this.totalRejectedByExtension = 0;
     this.lastJobProcessed = null;
     this.lastProcessedAt = null;
     this.currentJob = null;
@@ -17,6 +18,11 @@ class MetricsTracker {
     this.activeJobId = null;
     this.startedAt = new Date().toISOString();
     this.recentJobs = [];
+  }
+
+  addRejectedByExtension(count) {
+    metricsStore.addRejectedByExtension(count);
+    this.totalRejectedByExtension += count;
   }
 
   /**
@@ -134,6 +140,7 @@ class MetricsTracker {
       sessionProcessed: store.session.processed,
       sessionErrors: store.session.errors,
       sessionPhotos: store.session.photos,
+      sessionRejectedByExtension: store.session.rejectedByExtension,
       lastJobProcessed: this.lastJobProcessed,
       lastProcessedAt: this.lastProcessedAt,
       currentJob: this.currentJob,

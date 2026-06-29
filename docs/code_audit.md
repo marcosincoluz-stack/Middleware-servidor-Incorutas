@@ -339,3 +339,10 @@ pie title Distribución de Hallazgos (28 total)
 
 > [!NOTE]
 > **Contexto importante:** Con tu volumen actual de **80 trabajos/mes** y procesamiento secuencial (concurrencia=1), la mayoría de las race conditions (#1, #2, #10) tienen una probabilidad de manifestarse **muy baja**. Sin embargo, siguen siendo bugs reales que deben corregirse para garantizar la fiabilidad a largo plazo.
+
+---
+
+## 🛡️ Mejoras de Hardening Adicionales
+
+### lista blanca de extensiones de imagen (Sprints 34-35)
+Se ha implementado un mecanismo de control de extensiones en [downloader.js](file:///c:/Users/marcos/test-middleware/incorutas-photo-sync/src/services/downloader.js) y [image-validator.js](file:///c:/Users/marcos/test-middleware/incorutas-photo-sync/src/utils/image-validator.js) para rechazar la descarga de cualquier archivo de evidencia de tipo `photo` que no corresponda a un formato de imagen permitido (ej. `.jpg`, `.png`, `.webp`, `.heic`, etc.). Esta lista es totalmente configurable mediante la variable de entorno `ALLOWED_IMAGE_EXTENSIONS` y mitiga el riesgo de que archivos maliciosos o incorrectos (`.exe`, `.pdf`, `.zip`) se cuelen en el servidor local de archivos compartidos de Windows.

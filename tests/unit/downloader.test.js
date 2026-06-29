@@ -42,7 +42,8 @@ const mockJobQueue = {
 };
 
 const mockMetricsTracker = {
-  addPhotos: vi.fn()
+  addPhotos: vi.fn(),
+  addRejectedByExtension: vi.fn()
 };
 
 injectMock('../../src/services/supabase', { supabase: mockSupabase });
@@ -287,6 +288,34 @@ describe('downloader service', () => {
       expect(result.errors).toBe(1);
       expect(mockUpdate).toHaveBeenCalled();
     });
+
+    it('debería omitir y contar como error si la evidencia no tiene una extensión de imagen permitida', async () => {
+      const mockSingle = vi.fn().mockResolvedValue({
+        data: { downloaded_at: null, title: 'P260251 - Test' },
+        error: null
+      });
+      const mockEqJob = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelectJob = vi.fn().mockReturnValue({ eq: mockEqJob });
+
+      const evData = [
+        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.pdf', type: 'photo' },
+      ];
+      const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
+      const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqType = vi.fn().mockReturnValue({ is: mockIs });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
+      const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelectJob };
+        if (table === 'evidence') return { select: mockSelectEv };
+      });
+
+      mockCheckDiskSpace.mockResolvedValue({ freeMB: 1000, isSafe: true });
+
+      await expect(processJobApproved('job-123', 'P260251 - Test'))
+        .rejects.toThrow(/Sincronización incompleta: 1 fotos fallidas/);
+    });
   });
 
   describe('downloadFileWithRetry — atomic .part download', () => {
@@ -477,6 +506,35 @@ describe('downloader service', () => {
       expect(result.retried).toBe(1);
       expect(result.succeeded).toBe(0);
       expect(result.stillFailed).toBe(1);
+    });
+
+    it('debería omitir y contar como stillFailed si la foto tiene una extensión no permitida', async () => {
+      const mockSingle = vi.fn().mockResolvedValue({
+        data: { id: 'job-1', title: 'P260251 - Test', downloaded_at: '2026-06-15T10:00:00Z' },
+        error: null
+      });
+      const mockEqJob = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelectJob = vi.fn().mockReturnValue({ eq: mockEqJob });
+
+      const failedEvs = [
+        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.pdf', type: 'photo' },
+      ];
+      const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
+      const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockEqType = vi.fn().mockReturnValue({ is: mockIsNull });
+      const mockEqId = vi.fn().mockReturnValue({ in: mockEqType });
+      const mockSelectEv = vi.fn().mockReturnValue({ eq: mockEqId });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelectJob };
+        if (table === 'evidence') return { select: mockSelectEv };
+      });
+
+      const result = await retryFailedEvidences('job-1');
+      expect(result.retried).toBe(1);
+      expect(result.succeeded).toBe(0);
+      expect(result.stillFailed).toBe(1);
+      expect(mockMetricsTracker.addRejectedByExtension).toHaveBeenCalledWith(1);
     });
 
     it('debería contar url inválida como stillFailed', async () => {

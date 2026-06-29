@@ -370,6 +370,7 @@ async function _processJobApprovedInternal(jobId, jobTitle) {
   const skippedCount = 0;
   let errorCount = 0;
   let dbFailures = 0;
+  let rejectedCount = 0;
 
   for (const ev of evidences) {
     const storagePath = getStoragePath(ev.url);
@@ -401,6 +402,7 @@ async function _processJobApprovedInternal(jobId, jobTitle) {
     if (!isAllowedImageExtension(safeFilename)) {
       logger.warn(`[Downloader] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
       errorCount++;
+      rejectedCount++;
       continue;
     }
 
@@ -427,6 +429,10 @@ async function _processJobApprovedInternal(jobId, jobTitle) {
 
   // 6. Marcar el job como descargado según tolerancia
   const tolerance = Math.ceil(evidences.length * (config.DOWNLOAD_TOLERANCE_PERCENT / 100));
+
+  if (rejectedCount > 0) {
+    metricsTracker.addRejectedByExtension(rejectedCount);
+  }
 
   if (errorCount === 0) {
     await markJobAsDownloaded(jobId);
@@ -493,6 +499,7 @@ async function retryFailedEvidences(jobId) {
 
   let succeeded = 0;
   let stillFailed = 0;
+  let rejectedCount = 0;
 
   for (const ev of failedEvidences) {
     const storagePath = getStoragePath(ev.url);
@@ -521,6 +528,7 @@ async function retryFailedEvidences(jobId) {
     if (!isAllowedImageExtension(safeFilename)) {
       logger.warn(`[RetryFailed] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
       stillFailed++;
+      rejectedCount++;
       continue;
     }
 
@@ -539,6 +547,10 @@ async function retryFailedEvidences(jobId) {
   }
 
   logger.info(`[RetryFailed] Resumen para Job ${jobId}: Reintentadas: ${failedEvidences.length}, Exitosas: ${succeeded}, Aun fallidas: ${stillFailed}`);
+
+  if (rejectedCount > 0) {
+    metricsTracker.addRejectedByExtension(rejectedCount);
+  }
 
   if (succeeded > 0) {
     metricsTracker.addPhotos(succeeded);
