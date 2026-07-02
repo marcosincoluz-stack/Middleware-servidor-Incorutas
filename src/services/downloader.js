@@ -124,6 +124,46 @@ async function cleanupOrphanedPartFiles() {
 }
 
 /**
+ * Busca recursivamente una carpeta que empiece por el código del proyecto.
+ * Para optimizar la velocidad en red (SMB/CIFS), solo busca hasta un nivel de profundidad
+ * y omite escanear dentro de otras carpetas de proyecto (que empiezan por 'P').
+ *
+ * @param {string} dir Directorio base donde buscar (ej: 1ACTIVOS)
+ * @param {string} projectCode Código del proyecto (ej: P251967)
+ * @param {number} currentDepth Profundidad actual
+ * @param {number} maxDepth Profundidad máxima
+ * @returns {Promise<string|null>} Ruta absoluta de la carpeta del proyecto o null
+ */
+async function findProjectFolderRecursive(dir, projectCode, currentDepth = 0, maxDepth = 1) {
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+
+    // 1. Buscar coincidencia directa en el nivel actual
+    const match = entries.find(d => d.isDirectory() && d.name.toUpperCase().startsWith(projectCode));
+    if (match) {
+      return path.join(dir, match.name);
+    }
+
+    // 2. Si no se superó la profundidad máxima, buscar en subcarpetas de clientes (no de proyectos)
+    if (currentDepth < maxDepth) {
+      const subdirs = entries.filter(d => d.isDirectory() && !d.name.match(/^P\d+/i));
+      for (const subdir of subdirs) {
+        const foundPath = await findProjectFolderRecursive(
+          path.join(dir, subdir.name),
+          projectCode,
+          currentDepth + 1,
+          maxDepth
+        );
+        if (foundPath) return foundPath;
+      }
+    }
+  } catch (err) {
+    logger.warn(`[ResolveFolder] Error escaneando "${dir}" para buscar ${projectCode}: ${err.message}`);
+  }
+  return null;
+}
+
+/**
  * Busca o crea la carpeta del proyecto en 1ACTIVOS basándose en el código del proyecto (ej: P260251).
  * 
  * @param {string} jobTitle Título del trabajo
@@ -144,27 +184,23 @@ async function resolveProjectPhotosFolder(jobTitle) {
   try {
     await fs.promises.mkdir(activosPath, { recursive: true });
 
-    let folderName = null;
-    try {
-      const entries = await fs.promises.readdir(activosPath, { withFileTypes: true });
-      folderName = entries.find(d => {
-        return d.isDirectory() && d.name.toUpperCase().startsWith(projectCode);
-      })?.name || null;
-    } catch (err) {
-      throw new Error(`Error leyendo directorio 1ACTIVOS en "${activosPath}": ${err.message}`);
-    }
+    let finalPhotosPath = null;
+    const foundPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 1);
 
-    if (!folderName) {
+    if (foundPath) {
+      logger.info(`[ResolveFolder] Encontrada carpeta de proyecto existente en: "${foundPath}"`);
+      finalPhotosPath = path.join(foundPath, 'FOTOS', 'FOTOS TERMINADO');
+    } else {
       const remainingTitle = trimmedTitle.replace(/^(P\d+)\s*[-\s]*\s*/i, '');
       const cleanTitle = sanitizeFilename(remainingTitle);
-      folderName = `${projectCode} - ${cleanTitle}`;
+      const folderName = `${projectCode} - ${cleanTitle}`;
       
       const newDirPath = path.join(activosPath, folderName);
       logger.info(`No se encontró carpeta para proyecto ${projectCode}. Creando: "${newDirPath}"`);
       await fs.promises.mkdir(newDirPath, { recursive: true });
+      finalPhotosPath = path.join(newDirPath, 'FOTOS', 'FOTOS TERMINADO');
     }
 
-    const finalPhotosPath = path.join(activosPath, folderName, 'FOTOS', 'FOTOS TERMINADO');
     await fs.promises.mkdir(finalPhotosPath, { recursive: true });
 
     return ensurePathWithinBase(finalPhotosPath, config.TRABAJOS_BASE_PATH);
