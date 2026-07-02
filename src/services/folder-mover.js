@@ -131,7 +131,7 @@ async function moveJobToTerminados(jobId, jobTitle) {
 
   let sourceFullPath = null;
   try {
-    sourceFullPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 1);
+    sourceFullPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 4);
   } catch (err) {
     throw new Error(`Error buscando directorio activo para traslado: ${err.message}`);
   }

@@ -710,4 +710,47 @@ describe('downloader service', () => {
       fs.promises.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
     });
   });
+
+  describe('resolveProjectPhotosFolder', () => {
+    it('debería encontrar una carpeta de proyecto anidada a profundidad 3 y no entrar en subcarpetas de proyectos excluidos', async () => {
+      const tmpBase = path.join(os.tmpdir(), 'test-recursive-depth');
+      const activosDir = path.join(tmpBase, '1ACTIVOS');
+      // Estructura: 1ACTIVOS/SANTANDER/1_rotulos/P260999 - Test Profundo
+      const deepProjectDir = path.join(activosDir, 'SANTANDER', '1_rotulos', 'P260999 - Test Profundo');
+      await fs.promises.mkdir(deepProjectDir, { recursive: true });
+
+      // También creamos una carpeta excluida (FOTOS) dentro de otro proyecto para verificar que no entra ahí
+      const otherProjectDir = path.join(activosDir, 'P250001 - Other');
+      const fotosExcluidasDir = path.join(otherProjectDir, 'FOTOS', 'P260999 - Fake');
+      await fs.promises.mkdir(fotosExcluidasDir, { recursive: true });
+
+      clearDownloaderCache();
+      const mockConfig = {
+        TRABAJOS_BASE_PATH: tmpBase,
+        MIN_DISK_MB: 500,
+        IS_DEV_MODE: false,
+        DOWNLOAD_MAX_RETRIES: 1,
+        DOWNLOAD_RETRY_DELAY_MS: 1,
+        MAX_FILE_SIZE_MB: 50,
+        MAX_EVIDENCES_PER_JOB: 150,
+        DOWNLOAD_TOLERANCE_PERCENT: 0,
+        LOCK_PROVIDER: 'memory',
+        SUPABASE_BUCKET: 'evidence',
+        DISK_CHECK_INTERVAL: 10,
+        MAX_COLLISIONS: 100,
+      };
+      injectMock('../../src/config', mockConfig);
+
+      const { resolveProjectPhotosFolder } = require('../../src/services/downloader');
+
+      const result = await resolveProjectPhotosFolder('P260999 - Test Profundo');
+      
+      // Debe haber resuelto la ruta dentro de SANTANDER/1_rotulos y NO dentro de P250001/FOTOS
+      expect(result).toContain(path.join('SANTANDER', '1_rotulos', 'P260999 - Test Profundo', 'FOTOS', 'FOTOS TERMINADO'));
+      expect(result).not.toContain('P250001 - Other');
+
+      // Limpieza
+      await fs.promises.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
+    });
+  });
 });

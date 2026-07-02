@@ -123,10 +123,29 @@ async function cleanupOrphanedPartFiles() {
   return cleaned;
 }
 
+const EXCLUDED_DIR_NAMES = new Set([
+  'FOTOS', 'DOCUMENTACION', 'CALCULOS', 'FABRICACION',
+  'CORREOS', 'ORIGINALES', 'PROPUESTAS', 'FOTOS ANTES',
+  'FOTOS TERMINADO', 'TERMINADOS', '1ACTIVOS', '1TRABAJOS'
+]);
+
+/**
+ * Determina si una carpeta debe ser escaneada recursivamente en busca de proyectos.
+ * Evita entrar a carpetas de proyecto (empiezan por P) y subcarpetas internas estándar.
+ *
+ * @param {string} name Nombre del directorio
+ * @returns {boolean} true si se debe escanear, false en caso contrario
+ */
+function shouldScanDirectory(name) {
+  if (name.match(/^P\d+/i)) return false;
+  if (EXCLUDED_DIR_NAMES.has(name.toUpperCase())) return false;
+  return true;
+}
+
 /**
  * Busca recursivamente una carpeta que empiece por el código del proyecto.
- * Para optimizar la velocidad en red (SMB/CIFS), solo busca hasta un nivel de profundidad
- * y omite escanear dentro de otras carpetas de proyecto (que empiezan por 'P').
+ * Para optimizar la velocidad en red (SMB/CIFS), busca hasta 4 niveles de profundidad
+ * y omite escanear dentro de otras carpetas de proyecto (que empiezan por 'P') o subcarpetas internas.
  *
  * @param {string} dir Directorio base donde buscar (ej: 1ACTIVOS)
  * @param {string} projectCode Código del proyecto (ej: P251967)
@@ -134,7 +153,7 @@ async function cleanupOrphanedPartFiles() {
  * @param {number} maxDepth Profundidad máxima
  * @returns {Promise<string|null>} Ruta absoluta de la carpeta del proyecto o null
  */
-async function findProjectFolderRecursive(dir, projectCode, currentDepth = 0, maxDepth = 1) {
+async function findProjectFolderRecursive(dir, projectCode, currentDepth = 0, maxDepth = 4) {
   try {
     const entries = await fs.promises.readdir(dir, { withFileTypes: true });
 
@@ -144,9 +163,9 @@ async function findProjectFolderRecursive(dir, projectCode, currentDepth = 0, ma
       return path.join(dir, match.name);
     }
 
-    // 2. Si no se superó la profundidad máxima, buscar en subcarpetas de clientes (no de proyectos)
+    // 2. Si no se superó la profundidad máxima, buscar en subcarpetas (usando la poda)
     if (currentDepth < maxDepth) {
-      const subdirs = entries.filter(d => d.isDirectory() && !d.name.match(/^P\d+/i));
+      const subdirs = entries.filter(d => d.isDirectory() && shouldScanDirectory(d.name));
       for (const subdir of subdirs) {
         const foundPath = await findProjectFolderRecursive(
           path.join(dir, subdir.name),
@@ -185,7 +204,7 @@ async function resolveProjectPhotosFolder(jobTitle) {
     await fs.promises.mkdir(activosPath, { recursive: true });
 
     let finalPhotosPath = null;
-    const foundPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 1);
+    const foundPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 4);
 
     if (foundPath) {
       logger.info(`[ResolveFolder] Encontrada carpeta de proyecto existente en: "${foundPath}"`);
