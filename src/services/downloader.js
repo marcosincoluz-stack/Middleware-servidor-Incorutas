@@ -604,5 +604,6 @@ module.exports = {
   resolveProjectPhotosFolder,
   retryFailedEvidences,
   resolveUniqueFilename,
-  cleanupOrphanedPartFiles
+  cleanupOrphanedPartFiles,
+  findProjectFolderRecursive
 };

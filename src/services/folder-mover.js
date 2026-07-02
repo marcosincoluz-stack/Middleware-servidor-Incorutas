@@ -6,6 +6,7 @@ const { ensurePathWithinBase } = require('../utils/sanitize');
 const { supabase } = require('./supabase');
 const { createLockProvider } = require('../utils/lock');
 const { getRedisConnection } = require('../utils/redis-connection');
+const { findProjectFolderRecursive } = require('./downloader');
 
 const lockProvider = (function createProvider() {
   if (config.LOCK_PROVIDER === 'redis') {
@@ -128,20 +129,19 @@ async function moveJobToTerminados(jobId, jobTitle) {
     return { moved: false, reason: 'activos_dir_not_found' };
   }
 
-  let sourceDirName = null;
+  let sourceFullPath = null;
   try {
-    const entries = await fs.promises.readdir(activosPath, { withFileTypes: true });
-    sourceDirName = entries.find(d => d.isDirectory() && d.name.toUpperCase().startsWith(projectCode))?.name || null;
+    sourceFullPath = await findProjectFolderRecursive(activosPath, projectCode, 0, 1);
   } catch (err) {
-    throw new Error(`Error leyendo directorio 1ACTIVOS para traslado: ${err.message}`);
+    throw new Error(`Error buscando directorio activo para traslado: ${err.message}`);
   }
 
-  if (!sourceDirName) {
+  if (!sourceFullPath) {
     logger.warn(`[FolderMover] No se encontró ninguna carpeta activa para el código "${projectCode}" en "${activosPath}".`);
     return { moved: false, reason: 'project_folder_not_found' };
   }
 
-  const sourceFullPath = path.join(activosPath, sourceDirName);
+  const sourceDirName = path.basename(sourceFullPath);
 
   let terminadosExists = false;
   try {
