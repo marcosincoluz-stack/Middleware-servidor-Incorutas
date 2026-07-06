@@ -353,8 +353,11 @@ async function processJobPlano(jobId, jobTitle) {
       SUPABASE_QUERY_TIMEOUT_MS
     );
 
+    if (!job) {
+      logger.info(`[PlanoUploader] Job ${jobId} no existe en la BD (¿borrado de la app?). Omitiendo sin error. ${jobError ? '(' + jobError.message + ')' : ''}`);
+      return { skipped: true, reason: 'job_not_found' };
+    }
     if (jobError) throw jobError;
-    if (!job) throw new Error('El Job no existe en la base de datos.');
 
     const existingPlans = parsePlansUrl(job.plans_url);
     const uploadedNames = new Set(existingPlans.filter(e => e.name).map(e => e.name));
@@ -461,20 +464,38 @@ async function buildProjectFolderIndex(root) {
 let indexCache = { map: null, root: null, builtAt: 0 };
 
 /**
- * Devuelve el índice cacheado de carpetas de proyecto para `root`.
+ * Devuelve el índice cacheado de carpetas de proyecto para uno o varios roots.
  * Reutiliza el cache mientras no haya expirado (PLANO_INDEX_TTL_MS) y el root coincida.
+ * Para varios roots (ej: 1ACTIVOS + TERMINADOS), construye un mapa combinado.
  *
- * @param {string} root Directorio base (ej: 1ACTIVOS)
+ * @param {string|string[]} roots Directorio base o array de directorios
  * @returns {Promise<Map<string, string>>} Mapa P-code → ruta absoluta
  */
-async function getProjectFolderIndex(root) {
+async function getProjectFolderIndex(roots) {
+  const rootsArr = Array.isArray(roots) ? roots : [roots];
+  const cacheKey = rootsArr.join('|');
   const now = Date.now();
-  if (indexCache.map && indexCache.root === root && (now - indexCache.builtAt) < config.PLANO_INDEX_TTL_MS) {
+  if (indexCache.map && indexCache.root === cacheKey && (now - indexCache.builtAt) < config.PLANO_INDEX_TTL_MS) {
     return indexCache.map;
   }
-  logger.info(`[PlanoUploader] Construyendo índice de carpetas para "${root}"...`);
-  const map = await buildProjectFolderIndex(root);
-  indexCache = { map, root, builtAt: now };
+  logger.info(`[PlanoUploader] Construyendo índice de carpetas para [${rootsArr.join(', ')}]...`);
+  const map = new Map();
+  for (const root of rootsArr) {
+    try {
+      await fs.promises.access(root);
+    } catch {
+      continue;
+    }
+    const rootMap = await buildProjectFolderIndex(root);
+    for (const [k, v] of rootMap) {
+      if (!map.has(k)) {
+        map.set(k, v);
+      } else {
+        logger.warn(`[PlanoUploader] P-code duplicado "${k}" entre roots: "${v}" (ya estaba "${map.get(k)}"). Se conserva el primero.`);
+      }
+    }
+  }
+  indexCache = { map, root: cacheKey, builtAt: now };
   logger.info(`[PlanoUploader] Índice construido: ${map.size} carpetas de proyecto en cache.`);
   return map;
 }

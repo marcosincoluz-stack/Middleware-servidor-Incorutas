@@ -260,6 +260,19 @@ describe('plano-uploader service', () => {
       });
     }
 
+    it('omite sin error si el job no existe en la BD (borrado de la app)', async () => {
+      const mockSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'No rows', code: 'PGRST116' } });
+      const mockEq = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelect };
+      });
+
+      const result = await processJobPlano('job-deleted', 'P260251 - Test');
+      expect(result).toEqual({ skipped: true, reason: 'job_not_found' });
+      expect(mockUpload).not.toHaveBeenCalled();
+    });
+
     it('omite si el job ya tiene el máximo de planos (sin readdir)', async () => {
       const plansUrl = JSON.stringify([
         { name: 'P260251 - a.pdf', path: 'planos_j_1.pdf' },
