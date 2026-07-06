@@ -3,6 +3,7 @@ const config = require('../config');
 const { logger } = require('../utils/logger');
 const { processJobApproved, cleanupOrphanedPartFiles } = require('../services/downloader');
 const { moveJobToTerminados } = require('../services/folder-mover');
+const { processJobPlano } = require('../services/plano-uploader');
 const { metricsTracker } = require('./metrics-tracker');
 const { getFailedJobs, retryFailedJob, clearFailedJobs } = require('./dlq-handler');
 const { connection } = require('../utils/redis-connection');
@@ -38,6 +39,13 @@ class BullJobQueue {
           await supabaseBreaker.execute(() => moveJobToTerminados(jobId, title));
         } else {
           logger.info(`[FolderMover] Omitiendo movimiento a TERMINADOS para Job ${jobId} (desactivado)`);
+        }
+      } else if (event === 'job.plano') {
+        if (config.ENABLE_PLANO_UPLOAD) {
+          logger.info(`[PlanoUploader] Subiendo plano para Job ${jobId} ("${title}")`);
+          await supabaseBreaker.execute(() => processJobPlano(jobId, title));
+        } else {
+          logger.info(`[PlanoUploader] Subida de planos desactivada (ENABLE_PLANO_UPLOAD=false). Omitiendo Job ${jobId}.`);
         }
       } else {
         throw new Error(`Evento desconocido "${event}" recibido en la cola`);
@@ -76,7 +84,7 @@ class BullJobQueue {
    *
    * @param {string} jobId ID del trabajo a procesar
    * @param {string} title Título identificativo del trabajo
-   * @param {string} event Tipo de evento ('job.approved' | 'job.paid')
+   * @param {string} event Tipo de evento ('job.approved' | 'job.paid' | 'job.plano')
    * @returns {Promise<void>}
    */
   async enqueue(jobId, title, event) {
@@ -88,11 +96,21 @@ class BullJobQueue {
     if (existingJob) {
       const state = await existingJob.getState();
       if (state === 'completed') {
-        logger.info(`Cola: Job ${bullJobId} ya fue completado previamente. Ignorando duplicado.`);
+        if (event === 'job.plano') {
+          logger.debug(`Cola: Job ${bullJobId} completado. Re-encolando (auto-append de planos puede tener novedad).`);
+          try {
+            await existingJob.remove();
+          } catch (err) {
+            logger.debug(`Cola: No se pudo eliminar job completado ${bullJobId}: ${err.message}`);
+          }
+        } else {
+          logger.info(`Cola: Job ${bullJobId} ya fue completado previamente. Ignorando duplicado.`);
+          return;
+        }
+      } else {
+        logger.info(`Cola: Job ${bullJobId} ya existe en estado "${state}". Ignorando duplicado.`);
         return;
       }
-      logger.info(`Cola: Job ${bullJobId} ya existe en estado "${state}". Ignorando duplicado.`);
-      return;
     }
 
     await this.queue.add(

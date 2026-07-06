@@ -22,6 +22,11 @@ const mockQueue = {
     totalProcessed: 0,
     totalErrors: 0,
     totalPhotos: 0,
+    totalPlanos: 0,
+    sessionProcessed: 0,
+    sessionErrors: 0,
+    sessionPhotos: 0,
+    sessionPlanos: 0,
     lastJobProcessed: null,
     lastProcessedAt: null,
     currentJob: null,
@@ -155,6 +160,7 @@ describe('Integration Tests (API Endpoints)', () => {
     expect(res.body).toContain('photo_sync_jobs_total');
     expect(res.body).toContain('photo_sync_session_jobs_total');
     expect(res.body).toContain('photo_sync_photos_total');
+    expect(res.body).toContain('photo_sync_planos_total');
     expect(res.body).toContain('photo_sync_process_uptime_seconds');
   });
 
@@ -177,6 +183,22 @@ describe('Integration Tests (API Endpoints)', () => {
   it('GET /api/failed-evidences con token responde (auth OK, Supabase may fail)', async () => {
     const headers = { 'Authorization': `Bearer ${process.env.API_TOKEN}` };
     const res = await makeRequest('GET', '/api/failed-evidences', headers, null, 10000);
+    expect([200, 500]).toContain(res.statusCode);
+  }, 15000);
+
+  it('POST /api/upload-plano/:jobId sin token responde 401', async () => {
+    const res = await makeRequest('POST', '/api/upload-plano/some-job-id');
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('GET /api/pending-planos sin token responde 401', async () => {
+    const res = await makeRequest('GET', '/api/pending-planos');
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('GET /api/pending-planos con token responde (auth OK, Supabase may fail)', async () => {
+    const headers = { 'Authorization': `Bearer ${process.env.API_TOKEN}` };
+    const res = await makeRequest('GET', '/api/pending-planos', headers, null, 10000);
     expect([200, 500]).toContain(res.statusCode);
   }, 15000);
 });

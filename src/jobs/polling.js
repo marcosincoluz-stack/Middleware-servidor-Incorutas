@@ -5,6 +5,7 @@ const { logger } = require('../utils/logger');
 const { supabase } = require('../services/supabase');
 const { jobQueue } = require('./bull-queue');
 const notify = require('../utils/notify');
+const { getProjectFolderIndex, invalidateProjectFolderIndex, listMatchingPdfs, parsePlansUrl } = require('../services/plano-uploader');
 
 const SUPABASE_QUERY_TIMEOUT_MS = 10000;
 
@@ -215,11 +216,130 @@ async function pollStaleJobs() {
   return { found: staleJobs.length, healed };
 }
 
+/**
+ * Consulta Supabase por jobs pending y, para cada uno, verifica si hay planos NUEVOS
+ * en FABRICACION (PDFs que empiezan por el P-code y cuyo name no está ya en plans_url).
+ * Si hay planos nuevos, los encola en BullMQ como 'job.plano' (auto-append).
+ *
+ * Usa un índice cacheado P-code → ruta de 1ACTIVOS (rebuild on miss) para minimizar
+ * readdir en SMB. Omite jobs que ya tienen PLANO_MAX_PLANOS_PER_JOB planos subidos.
+ * Respeta el backpressure.
+ *
+ * @returns {Promise<{ found: number, enqueued: number, skipped: number }>}
+ */
+async function pollPlanosJobs() {
+  if (!config.ENABLE_PLANO_UPLOAD) {
+    return { found: 0, enqueued: 0, skipped: 0 };
+  }
+
+  if (!Array.isArray(config.PLANO_UPLOAD_STATUSES) || config.PLANO_UPLOAD_STATUSES.length === 0) {
+    logger.debug('[Polling] PLANO_UPLOAD_STATUSES vacío. Skip ciclo planos.');
+    return { found: 0, enqueued: 0, skipped: 0 };
+  }
+
+  const pendingCount = await jobQueue.getPendingCount();
+  if (pendingCount >= config.BACKFILL_MAX_PENDING) {
+    logger.debug(`[Polling] Backpressure: ${pendingCount} jobs pendientes (límite ${config.BACKFILL_MAX_PENDING}). Skip ciclo planos.`);
+    return { found: 0, enqueued: 0, skipped: 0 };
+  }
+
+  const { data: jobs, error } = await withTimeout(
+    supabase
+      .from('jobs')
+      .select('id, title, plans_url')
+      .in('status', config.PLANO_UPLOAD_STATUSES)
+      .order('created_at', { ascending: true })
+      .limit(config.BACKFILL_MAX_JOBS)
+  );
+
+  if (error) throw error;
+
+  if (!jobs || jobs.length === 0) {
+    return { found: 0, enqueued: 0, skipped: 0 };
+  }
+
+  const activosPath = path.join(config.TRABAJOS_BASE_PATH, '1ACTIVOS');
+
+  let index;
+  try {
+    index = await getProjectFolderIndex(activosPath);
+  } catch (err) {
+    logger.debug(`[Polling] No se pudo construir índice de 1ACTIVOS para planos: ${err.message}`);
+    return { found: jobs.length, enqueued: 0, skipped: jobs.length };
+  }
+
+  let enqueued = 0;
+  let skipped = 0;
+  let indexRebuilt = false;
+
+  for (const job of jobs) {
+    const match = (job.title || '').trim().match(/^(P\d+)/i);
+    if (!match) {
+      skipped++;
+      continue;
+    }
+
+    const projectCode = match[1].toUpperCase();
+
+    const existingPlans = parsePlansUrl(job.plans_url);
+    const uploadedNames = new Set(existingPlans.filter(e => e.name).map(e => e.name));
+
+    if (existingPlans.length >= config.PLANO_MAX_PLANOS_PER_JOB) {
+      skipped++;
+      continue;
+    }
+
+    let folderPath = index.get(projectCode);
+
+    if (!folderPath && !indexRebuilt) {
+      logger.debug(`[Polling] P-code "${projectCode}" no en índice. Reconstruyendo (carpeta posiblemente nueva)...`);
+      invalidateProjectFolderIndex();
+      index = await getProjectFolderIndex(activosPath);
+      indexRebuilt = true;
+      folderPath = index.get(projectCode);
+    }
+
+    if (!folderPath) {
+      skipped++;
+      continue;
+    }
+
+    const fabricacionPath = path.join(folderPath, config.PLANO_SCAN_SUBFOLDER);
+    let pdfs;
+    try {
+      pdfs = await listMatchingPdfs(fabricacionPath, projectCode);
+    } catch (err) {
+      logger.debug(`[Polling] readdir FABRICACION falló para ${projectCode}: ${err.message}`);
+      skipped++;
+      continue;
+    }
+
+    const hasNew = pdfs.some(p => !uploadedNames.has(p.name));
+    if (!hasNew) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      await jobQueue.enqueue(job.id, job.title, 'job.plano');
+      enqueued++;
+    } catch (err) {
+      logger.debug(`[Polling] Job plano ${job.id} no encolado (probablemente duplicado): ${err.message}`);
+      skipped++;
+    }
+  }
+
+  logger.info(`[Polling] Planos: ${jobs.length} encontrados, ${enqueued} con planos nuevos encolados, ${skipped} sin novedad/duplicados`);
+  return { found: jobs.length, enqueued, skipped };
+}
+
 let pollInterval = null;
 let approvedFailCount = 0;
 let paidFailCount = 0;
+let planoFailCount = 0;
 let lastApprovedAlert = 0;
 let lastPaidAlert = 0;
+let lastPlanoAlert = 0;
 let isPolling = false;
 
 async function runPollCycle() {
@@ -245,6 +365,15 @@ async function runPollCycle() {
     await pollStaleJobs();
   } catch (err) {
     logger.error(`[Polling] Error en ciclo auto-heal: ${err.message}`);
+  }
+
+  try {
+    await pollPlanosJobs();
+    planoFailCount = 0;
+  } catch (err) {
+    logger.error(`[Polling] Error en ciclo planos: ${err.message}`);
+    planoFailCount++;
+    await maybeAlertPollingFailure(planoFailCount, err.message, 'planos', lastPlanoAlert, (ts) => { lastPlanoAlert = ts; });
   }
 }
 
@@ -300,4 +429,4 @@ function stopPolling() {
   }
 }
 
-module.exports = { startPolling, stopPolling, pollApprovedJobs, pollPaidJobs, pollStaleJobs, runPollCycle };
+module.exports = { startPolling, stopPolling, pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs, runPollCycle };

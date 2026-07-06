@@ -208,6 +208,7 @@ async function fetchData() {
     document.getElementById('statProcessed').textContent = data.queue.totalProcessed;
     document.getElementById('statPhotos').textContent = data.queue.totalPhotos;
     document.getElementById('statErrors').textContent = data.queue.totalErrors;
+    document.getElementById('statPlanos').textContent = data.queue.totalPlanos;
 
     // Subtextos de sesión y fecha de inicio histórico
     const firstStartedDate = data.process.startedAt ? new Date(data.process.startedAt) : null;
@@ -220,6 +221,7 @@ async function fetchData() {
     document.getElementById('statProcessedSub').textContent = `En sesión: ${data.queue.sessionProcessed}`;
     document.getElementById('statPhotosSub').textContent = `En sesión: ${data.queue.sessionPhotos}`;
     document.getElementById('statErrorsSub').textContent = `En sesión: ${data.queue.sessionErrors}`;
+    document.getElementById('statPlanosSub').textContent = `En sesión: ${data.queue.sessionPlanos}`;
 
     // ── 3. Health Card ──
     // SMB status
@@ -602,10 +604,94 @@ async function retryFailed(jobId, btn) {
   }
 }
 
+async function fetchPendingPlanos() {
+  try {
+    const res = await authFetch(`${API_BASE}/api/pending-planos`, {}, 'pending-planos');
+    const data = await res.json();
+
+    const section = document.getElementById('pendingPlanosSection');
+    const list = document.getElementById('pendingPlanosList');
+    const badge = document.getElementById('pendingPlanosBadge');
+
+    if (data.success && data.jobs && data.jobs.length > 0) {
+      section.style.display = 'block';
+      badge.innerHTML = `<span class="badge badge--warning">${data.jobs.length} job${data.jobs.length > 1 ? 's' : ''}</span>`;
+      list.innerHTML = '';
+
+      data.jobs.forEach(job => {
+        const item = document.createElement('div');
+        item.className = 'recent-job';
+        item.style.flexDirection = 'column';
+        item.style.alignItems = 'stretch';
+        item.style.gap = '0.5rem';
+        item.style.padding = '0.75rem';
+
+        item.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem;">
+            <div class="recent-job__left" style="min-width: 0; flex-grow: 1;">
+              <span class="recent-job__dot recent-job__dot--failed"></span>
+              <span class="recent-job__title" style="font-weight: 600;" title="${escapeHtml(job.title)}">${escapeHtml(job.title)}</span>
+              <span class="badge badge--secondary" style="font-size: 0.65rem; flex-shrink: 0;">${escapeHtml(job.status)}</span>
+            </div>
+            <button class="btn btn--default" style="font-size: 0.7rem; padding: 0.25rem 0.6rem; flex-shrink: 0;" onclick="uploadPlano('${job.jobId}', this)">
+              Re-subir plano
+            </button>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+    } else {
+      section.style.display = 'none';
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    console.error('Error fetching pending planos:', err);
+  }
+}
+
+async function uploadPlano(jobId, btn) {
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<svg class="animate-spin" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Subiendo...`;
+
+  try {
+    const res = await authFetch(`${API_BASE}/api/upload-plano/${jobId}`, { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      if (data.skipped) {
+        const reasonMap = {
+          'already_uploaded': 'El job ya tiene un plano asignado',
+          'no_folder': 'No se encontró la carpeta FABRICACION del proyecto (el plano aún no está listo)',
+          'no_pdf': 'La carpeta FABRICACION no contiene ningún PDF',
+          'multiple_skip_policy': 'Hay varios PDFs en FABRICACION; revisa Telegram y elige uno',
+          'lock_contention': 'El job ya se está procesando, espera unos segundos',
+          'race_condition_resolved': 'El plano ya fue subido por otro proceso'
+        };
+        showToast(reasonMap[data.reason] || `Omitido: ${data.reason}`, 'info');
+      } else if (data.uploaded) {
+        showToast(`Plano subido: ${data.uploaded}`, 'success');
+      } else {
+        showToast('Operación completada', 'success');
+      }
+      fetchPendingPlanos();
+      fetchData();
+    } else {
+      showToast(data.error || 'Error al subir el plano', 'error');
+    }
+  } catch (err) {
+    showToast('Error en la petici\u00f3n: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHTML;
+  }
+}
+
 // Initial load
 fetchData();
 fetchDlq();
 fetchFailedEvidences();
+fetchPendingPlanos();
 fetchLogs();
 
 // Auto-refresh stats and logs
@@ -613,5 +699,6 @@ setInterval(() => {
   fetchData();
   fetchDlq();
   fetchFailedEvidences();
+  fetchPendingPlanos();
   fetchLogs();
 }, REFRESH_INTERVAL);

@@ -68,6 +68,15 @@
         <span class="stat-card__value" id="statErrors"><span class="skeleton"></span></span>
         <div class="stat-card__sub" id="statErrorsSub"><span class="skeleton"></span></div>
       </div>
+      <div class="stat-card">
+        <span class="stat-card__label">
+          <!-- File icon SVG -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Planos subidos
+        </span>
+        <span class="stat-card__value" id="statPlanos"><span class="skeleton"></span></span>
+        <div class="stat-card__sub" id="statPlanosSub"><span class="skeleton"></span></div>
+      </div>
     </div>
 
     <!-- Main Grid -->
@@ -191,6 +200,22 @@
       <div class="card__body">
         <div class="recent-jobs" id="dlqJobsList">
           <div class="recent-jobs__empty">Cargando cola de errores...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Planos Pendientes (sin subir) -->
+    <div class="card failed-ev-card" id="pendingPlanosSection" style="margin-bottom: 1.5rem; display: none;">
+      <div class="card__header" style="border-bottom-color: hsl(var(--warning) / 0.3);">
+        <div class="card__title-wrapper">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: hsl(var(--warning))"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <h2 class="card__title" style="color: hsl(var(--warning))">Planos Pendientes (sin subir)</h2>
+        </div>
+        <span id="pendingPlanosBadge"><span class="skeleton" style="width: 40px;"></span></span>
+      </div>
+      <div class="card__body">
+        <div class="recent-jobs" id="pendingPlanosList">
+          <div class="recent-jobs__empty">Cargando planos pendientes...</div>
         </div>
       </div>
     </div>

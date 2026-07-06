@@ -25,6 +25,10 @@ class MetricsTracker {
     this.totalRejectedByExtension += count;
   }
 
+  addPlanos(count) {
+    metricsStore.addPlanos(count);
+  }
+
   /**
    * Maneja el evento 'completed' del worker.
    * Actualiza métricas de sesión y persistentes.
@@ -78,6 +82,8 @@ class MetricsTracker {
           await notify.alertLowDisk(disk.freeMB, config.MIN_DISK_MB);
         } else if (classification.type === 'smb_disconnected') {
           await notify.alertSmbDisconnected(config.TRABAJOS_BASE_PATH);
+        } else if (classification.type === 'file_lock') {
+          logger.warn(`Cola: Job ${jobId} falló por archivo bloqueado (EBUSY/EPERM). Es transitorio en SMB; BullMQ reintentará.`);
         }
         await notify.alertJobFailed(jobId, title, `Fallo definitivo tras ${attempts} intentos. Error: ${err.message}`);
       } catch (notifyErr) {
@@ -137,9 +143,11 @@ class MetricsTracker {
       totalProcessed: store.historical.totalProcessed,
       totalErrors: store.historical.totalErrors,
       totalPhotos: store.historical.totalPhotos,
+      totalPlanos: store.historical.totalPlanos,
       sessionProcessed: store.session.processed,
       sessionErrors: store.session.errors,
       sessionPhotos: store.session.photos,
+      sessionPlanos: store.session.planos,
       sessionRejectedByExtension: store.session.rejectedByExtension,
       lastJobProcessed: this.lastJobProcessed,
       lastProcessedAt: this.lastProcessedAt,

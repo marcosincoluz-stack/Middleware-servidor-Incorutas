@@ -127,6 +127,27 @@ const config = {
   // Health Check
   HEALTH_PING_TIMEOUT_MS: parseInt(process.env.HEALTH_PING_TIMEOUT_MS, 10) || 3000,
 
+  // ── Planos (subida de PDF a Supabase Storage) ──
+  // Feature flag: subida automática de planos desde el servidor a Supabase
+  ENABLE_PLANO_UPLOAD: process.env.ENABLE_PLANO_UPLOAD !== 'false',
+  // Bucket de Supabase donde se almacenan los planos (distinto del de evidencias)
+  SUPABASE_PLANOS_BUCKET: process.env.SUPABASE_PLANOS_BUCKET || 'mounting-orders',
+  // Subcarpeta del proyecto donde buscar el PDF del plano (hijo directo de la carpeta P*)
+  PLANO_SCAN_SUBFOLDER: process.env.PLANO_SCAN_SUBFOLDER || 'FABRICACION',
+  // Tamaño máximo del plano en MB (se lee a Buffer para validar magic bytes)
+  PLANO_MAX_SIZE_MB: parseInt(process.env.PLANO_MAX_SIZE_MB, 10) || 50,
+  // Máximo de planos por job (se suben hasta este número; el resto se omite con alerta)
+  PLANO_MAX_PLANOS_PER_JOB: parseInt(process.env.PLANO_MAX_PLANOS_PER_JOB, 10) || 4,
+  // Status de jobs a escanear (solo estos se consideran candidatos para subir plano)
+  PLANO_UPLOAD_STATUSES: (process.env.PLANO_UPLOAD_STATUSES || 'pending')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(s => s.length > 0),
+  // Profundidad máxima al buscar la carpeta del proyecto (anidamiento en carpetas organizativas)
+  PROJECT_FOLDER_MAX_DEPTH: parseInt(process.env.PROJECT_FOLDER_MAX_DEPTH, 10) || 4,
+  // TTL del índice cacheado P-code → ruta (reducir readdir en SMB)
+  PLANO_INDEX_TTL_MS: parseInt(process.env.PLANO_INDEX_TTL_MS, 10) || 300000,
+
   // Lista blanca de extensiones de imagen permitidas para descarga
   ALLOWED_IMAGE_EXTENSIONS: (process.env.ALLOWED_IMAGE_EXTENSIONS || 'jpg,jpeg,png,webp,heic,heif,gif,bmp,tiff,tif')
     .split(',')

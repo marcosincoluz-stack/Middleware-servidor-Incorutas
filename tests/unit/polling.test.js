@@ -12,6 +12,10 @@ const mockEnqueue = vi.fn();
 const mockGetPendingCount = vi.fn();
 const mockRetryFailedEvidences = vi.fn();
 const mockAddPhotos = vi.fn();
+const mockGetProjectFolderIndex = vi.fn();
+const mockListMatchingPdfs = vi.fn();
+const mockParsePlansUrl = vi.fn();
+const mockInvalidateProjectFolderIndex = vi.fn();
 
 const injectMock = (modulePath, exportsObject) => {
   const resolved = require.resolve(modulePath);
@@ -40,6 +44,12 @@ injectMock('../../src/utils/logger', {
 });
 injectMock('../../src/jobs/metrics-tracker', { metricsTracker: { addPhotos: mockAddPhotos } });
 injectMock('../../src/services/downloader', { retryFailedEvidences: mockRetryFailedEvidences });
+injectMock('../../src/services/plano-uploader', {
+  getProjectFolderIndex: mockGetProjectFolderIndex,
+  listMatchingPdfs: mockListMatchingPdfs,
+  parsePlansUrl: mockParsePlansUrl,
+  invalidateProjectFolderIndex: mockInvalidateProjectFolderIndex,
+});
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'polling-test-'));
 injectMock('../../src/config', {
@@ -60,7 +70,9 @@ const clearCache = (pattern) => {
 };
 clearCache('polling');
 
-const { pollApprovedJobs, pollPaidJobs, pollStaleJobs } = require('../../src/jobs/polling');
+const { pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs } = require('../../src/jobs/polling');
+
+const config = require('../../src/config');
 
 describe('polling module', () => {
   let activosDir;
@@ -72,6 +84,10 @@ describe('polling module', () => {
     mockGetPendingCount.mockReset();
     mockRetryFailedEvidences.mockReset();
     mockAddPhotos.mockReset();
+    mockGetProjectFolderIndex.mockReset();
+    mockListMatchingPdfs.mockReset();
+    mockParsePlansUrl.mockReset();
+    mockInvalidateProjectFolderIndex.mockReset();
 
     activosDir = path.join(tmpDir, '1ACTIVOS');
     fs.rmSync(activosDir, { recursive: true, force: true });
@@ -429,6 +445,187 @@ describe('polling module', () => {
       expect(result.found).toBe(0);
       expect(result.healed).toBe(0);
       expect(mockRetryFailedEvidences).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pollPlanosJobs', () => {
+    beforeEach(() => {
+      config.ENABLE_PLANO_UPLOAD = true;
+      config.PLANO_UPLOAD_STATUSES = ['pending'];
+      config.PLANO_SCAN_SUBFOLDER = 'FABRICACION';
+      config.PROJECT_FOLDER_MAX_DEPTH = 4;
+      config.PLANO_INDEX_TTL_MS = 300000;
+      config.PLANO_MAX_PLANOS_PER_JOB = 4;
+    });
+
+    afterEach(() => {
+      delete config.ENABLE_PLANO_UPLOAD;
+      delete config.PLANO_UPLOAD_STATUSES;
+      delete config.PLANO_SCAN_SUBFOLDER;
+      delete config.PROJECT_FOLDER_MAX_DEPTH;
+      delete config.PLANO_INDEX_TTL_MS;
+      delete config.PLANO_MAX_PLANOS_PER_JOB;
+    });
+
+    function mockJobsQuery(jobs) {
+      const mockLimit = vi.fn().mockResolvedValue({ data: jobs, error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIn = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
+      mockFrom.mockReturnValue({ select: mockSelect });
+    }
+
+    it('debería devolver ceros sin consultar Supabase si ENABLE_PLANO_UPLOAD es false', async () => {
+      config.ENABLE_PLANO_UPLOAD = false;
+      mockGetPendingCount.mockResolvedValue(0);
+
+      const result = await pollPlanosJobs();
+
+      expect(result).toEqual({ found: 0, enqueued: 0, skipped: 0 });
+      expect(mockFrom).not.toHaveBeenCalled();
+      expect(mockGetProjectFolderIndex).not.toHaveBeenCalled();
+    });
+
+    it('debería devolver ceros si PLANO_UPLOAD_STATUSES está vacío (misconfiguración)', async () => {
+      config.PLANO_UPLOAD_STATUSES = [];
+      mockGetPendingCount.mockResolvedValue(0);
+
+      const result = await pollPlanosJobs();
+
+      expect(result).toEqual({ found: 0, enqueued: 0, skipped: 0 });
+      expect(mockFrom).not.toHaveBeenCalled();
+      expect(mockGetPendingCount).not.toHaveBeenCalled();
+    });
+
+    it('debería aplicar backpressure y skip si la cola está llena', async () => {
+      mockGetPendingCount.mockResolvedValue(200);
+
+      const result = await pollPlanosJobs();
+
+      expect(result).toEqual({ found: 0, enqueued: 0, skipped: 0 });
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it('debería devolver ceros si no hay jobs pending', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([]);
+
+      const result = await pollPlanosJobs();
+
+      expect(result).toEqual({ found: 0, enqueued: 0, skipped: 0 });
+      expect(mockGetProjectFolderIndex).not.toHaveBeenCalled();
+    });
+
+    it('debería encolar job.plano si hay planos nuevos (diff: 1 subido, 2 en carpeta)', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - viejo.pdf"}]' }]);
+
+      mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
+      mockParsePlansUrl.mockReturnValue([{ name: 'P260251 - viejo.pdf', path: 'planos_job-1_P260251 - viejo.pdf' }]);
+      mockListMatchingPdfs.mockResolvedValue([
+        { name: 'P260251 - viejo.pdf' },
+        { name: 'P260251 - nuevo.pdf' },
+      ]);
+      mockEnqueue.mockResolvedValue(undefined);
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(1);
+      expect(mockListMatchingPdfs).toHaveBeenCalledWith(expect.stringContaining('FABRICACION'), 'P260251');
+      expect(mockEnqueue).toHaveBeenCalledWith('job-1', 'P260251 - Obra A', 'job.plano');
+    });
+
+    it('debería skip si todos los planos ya están subidos (up_to_date)', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - x.pdf"}]' }]);
+
+      mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
+      mockParsePlansUrl.mockReturnValue([{ name: 'P260251 - x.pdf', path: 'planos_job-1_x.pdf' }]);
+      mockListMatchingPdfs.mockResolvedValue([{ name: 'P260251 - x.pdf' }]);
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockEnqueue).not.toHaveBeenCalled();
+    });
+
+    it('debería skip sin hacer readdir si el job ya tiene 4 planos (máximo)', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{}]' }]);
+
+      mockParsePlansUrl.mockReturnValue([
+        { name: 'a.pdf', path: 'p1' },
+        { name: 'b.pdf', path: 'p2' },
+        { name: 'c.pdf', path: 'p3' },
+        { name: 'd.pdf', path: 'p4' },
+      ]);
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockListMatchingPdfs).not.toHaveBeenCalled();
+    });
+
+    it('debería skip jobs cuya carpeta no está en el índice (sin plano listo)', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }]);
+
+      mockGetProjectFolderIndex.mockResolvedValue(new Map());
+      mockParsePlansUrl.mockReturnValue([]);
+      mockListMatchingPdfs.mockResolvedValue([]);
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockEnqueue).not.toHaveBeenCalled();
+      expect(mockInvalidateProjectFolderIndex).toHaveBeenCalled();
+    });
+
+    it('debería skip jobs con FABRICACION sin PDFs que matcheen', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }]);
+
+      mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
+      mockParsePlansUrl.mockReturnValue([]);
+      mockListMatchingPdfs.mockResolvedValue([]);
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(mockEnqueue).not.toHaveBeenCalled();
+    });
+
+    it('debería skip jobs cuyo título no tiene código P válido', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      mockJobsQuery([{ id: 'job-1', title: 'Sin Codigo', plans_url: null }]);
+
+      mockGetProjectFolderIndex.mockResolvedValue(new Map());
+
+      const result = await pollPlanosJobs();
+
+      expect(result.found).toBe(1);
+      expect(result.enqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+    });
+
+    it('debería lanzar el error de Supabase (lo captura runPollCycle)', async () => {
+      mockGetPendingCount.mockResolvedValue(0);
+      const mockLimit = vi.fn().mockResolvedValue({ data: null, error: { message: 'Supabase error' } });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIn = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      await expect(pollPlanosJobs()).rejects.toThrow(/Supabase error/);
     });
   });
 });

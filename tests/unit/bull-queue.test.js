@@ -43,8 +43,11 @@ class MockQueue {
   }
 }
 
+let workerHandler = null;
+
 class MockWorker {
-  constructor() {
+  constructor(queueName, handler) {
+    workerHandler = handler;
     this.on = mockWorkerOn;
     this.close = mockWorkerClose;
   }
@@ -68,12 +71,14 @@ injectMock('ioredis', MockRedis);
 
 const mockProcessJobApproved = vi.fn();
 const mockMoveJobToTerminados = vi.fn();
+const mockProcessJobPlano = vi.fn();
 
 injectMock('../../src/services/downloader', {
   processJobApproved: mockProcessJobApproved,
   cleanupOrphanedPartFiles: vi.fn().mockResolvedValue(0),
 });
 injectMock('../../src/services/folder-mover', { moveJobToTerminados: mockMoveJobToTerminados });
+injectMock('../../src/services/plano-uploader', { processJobPlano: mockProcessJobPlano });
 
 const mockMetricsTracker = {
   onCompleted: vi.fn(),
@@ -122,6 +127,7 @@ clearCache('bull-queue');
 const { jobQueue } = require('../../src/jobs/bull-queue');
 
 const getWorkerHandler = (eventName) => workerHandlers[eventName] || null;
+const getWorkerFn = () => workerHandler;
 
 describe('bull-queue service', () => {
   beforeEach(() => {
@@ -170,6 +176,7 @@ describe('bull-queue service', () => {
   it('enqueue() ignora job duplicado si ya fue completado', async () => {
     const mockExistingJob = {
       getState: vi.fn().mockResolvedValue('completed'),
+      remove: vi.fn().mockResolvedValue(undefined),
     };
     mockQueueGetJob.mockResolvedValue(mockExistingJob);
 
@@ -177,6 +184,37 @@ describe('bull-queue service', () => {
 
     expect(mockQueueAdd).not.toHaveBeenCalled();
     expect(mockExistingJob.getState).toHaveBeenCalled();
+    expect(mockExistingJob.remove).not.toHaveBeenCalled();
+  });
+
+  it('enqueue() re-encola job.plano tras completed (auto-append) eliminando el viejo', async () => {
+    const mockExistingJob = {
+      getState: vi.fn().mockResolvedValue('completed'),
+      remove: vi.fn().mockResolvedValue(undefined),
+    };
+    mockQueueGetJob.mockResolvedValue(mockExistingJob);
+
+    await jobQueue.enqueue('job-plano-1', 'P260251 - Plano', 'job.plano');
+
+    expect(mockExistingJob.remove).toHaveBeenCalled();
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'sync-task',
+      { jobId: 'job-plano-1', title: 'P260251 - Plano', event: 'job.plano' },
+      expect.objectContaining({ jobId: 'job.plano-job-plano-1' })
+    );
+  });
+
+  it('enqueue() NO re-encola job.plano si está en estado wait (en progreso)', async () => {
+    const mockExistingJob = {
+      getState: vi.fn().mockResolvedValue('wait'),
+      remove: vi.fn().mockResolvedValue(undefined),
+    };
+    mockQueueGetJob.mockResolvedValue(mockExistingJob);
+
+    await jobQueue.enqueue('job-plano-2', 'P260251 - Plano', 'job.plano');
+
+    expect(mockExistingJob.remove).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
   it('enqueue() ignora job duplicado si ya está en la cola (estado wait)', async () => {
@@ -289,5 +327,51 @@ describe('bull-queue service', () => {
   it('worker event "error" registra un handler', () => {
     const errorHandler = getWorkerHandler('error');
     expect(errorHandler).toBeDefined();
+  });
+
+  it('worker fn dispatcha event "job.plano" a processJobPlano', async () => {
+    const workerFn = getWorkerFn();
+    expect(workerFn).toBeDefined();
+
+    mockProcessJobPlano.mockResolvedValue({ uploaded: 'planos_x.pdf' });
+
+    const fakeJob = {
+      data: { jobId: 'job-plano-1', title: 'P260251 - Test', event: 'job.plano' },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await workerFn(fakeJob);
+
+    expect(mockProcessJobPlano).toHaveBeenCalledWith('job-plano-1', 'P260251 - Test');
+  });
+
+  it('worker fn dispatcha event "job.approved" a processJobApproved', async () => {
+    const workerFn = getWorkerFn();
+    mockProcessJobApproved.mockResolvedValue({ downloaded: 0, skipped: 0 });
+
+    const fakeJob = {
+      data: { jobId: 'job-approved-1', title: 'P260251 - Test', event: 'job.approved' },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await workerFn(fakeJob);
+
+    expect(mockProcessJobApproved).toHaveBeenCalledWith('job-approved-1', 'P260251 - Test');
+  });
+
+  it('worker fn lanza error ante un evento desconocido', async () => {
+    const workerFn = getWorkerFn();
+
+    const fakeJob = {
+      data: { jobId: 'job-x', title: 'P260251 - Test', event: 'job.unknown' },
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await expect(workerFn(fakeJob)).rejects.toThrow(/Evento desconocido "job.unknown"/);
+    expect(mockProcessJobPlano).not.toHaveBeenCalled();
+    expect(mockProcessJobApproved).not.toHaveBeenCalled();
   });
 });

@@ -206,6 +206,28 @@ const notify = {
     return sendTelegramNotification(text);
   },
 
+  async alertMultiplePlanos(jobId, title, foundCount, uploadedCount, omittedCount, omittedNames) {
+    const escapedOmitted = (omittedNames || []).map(n => `<code>${escapeHtml(n)}</code>`).join(', ');
+
+    const fields = [
+      ['Proyecto', `<code>${escapeHtml(title)}</code>`],
+      ['Job ID', `<code>${escapeHtml(jobId)}</code>`],
+      ['Encontrados', `<code>${foundCount}</code>`],
+      ['Subidos', `<code>${uploadedCount}</code>`],
+    ];
+    if (omittedCount > 0) {
+      fields.push(['Omitidos', `<code>${omittedCount}</code>`]);
+      fields.push(['Nombres', escapedOmitted]);
+    }
+
+    const action = omittedCount > 0
+      ? 'Algunos planos omitidos por exceder el máximo por job'
+      : `${uploadedCount} plano(s) subido(s)`;
+
+    const text = buildAlert('🟠', 'PLANOS EN FABRICACION', fields, action);
+    return sendTelegramNotification(text);
+  },
+
   async notifyStartup(port, mode, smbStatus, isAutoRestart = false) {
     const fields = [
       ['Puerto', `<code>${port}</code>`],

@@ -11,6 +11,7 @@ class MetricsStore {
       totalProcessed: 0,
       totalErrors: 0,
       totalPhotos: 0,
+      totalPlanos: 0,
       firstStartedAt: new Date().toISOString()
     };
     
@@ -20,6 +21,7 @@ class MetricsStore {
       processed: 0,
       errors: 0,
       photos: 0,
+      planos: 0,
       rejectedByExtension: 0
     };
 
@@ -40,7 +42,7 @@ class MetricsStore {
         const parsed = JSON.parse(data);
 
         const validated = {};
-        for (const key of ['totalProcessed', 'totalErrors', 'totalPhotos']) {
+        for (const key of ['totalProcessed', 'totalErrors', 'totalPhotos', 'totalPlanos']) {
           validated[key] = (typeof parsed[key] === 'number' && !Number.isNaN(parsed[key]))
             ? parsed[key]
             : 0;
@@ -53,7 +55,7 @@ class MetricsStore {
           ...this.metrics,
           ...validated
         };
-        logger.info(`[MetricsStore] Métricas cargadas de disco: totalProcessed=${this.metrics.totalProcessed}, totalPhotos=${this.metrics.totalPhotos}`);
+        logger.info(`[MetricsStore] Métricas cargadas de disco: totalProcessed=${this.metrics.totalProcessed}, totalPhotos=${this.metrics.totalPhotos}, totalPlanos=${this.metrics.totalPlanos}`);
       } else {
         logger.info('[MetricsStore] No se encontró archivo de métricas. Creando uno inicial.');
         this.saveSync();
@@ -88,6 +90,13 @@ class MetricsStore {
     if (count > 0) {
       this.metrics.totalPhotos += count;
       this.session.photos += count;
+    }
+  }
+
+  addPlanos(count) {
+    if (count > 0) {
+      this.metrics.totalPlanos += count;
+      this.session.planos += count;
     }
   }
 

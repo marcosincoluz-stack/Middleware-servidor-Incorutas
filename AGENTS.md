@@ -13,17 +13,18 @@ src/
   shutdown.js           — Graceful shutdown: closeAllConnections → drain jobs → close Redis → persist metrics
   routes/
     diagnostic.js      — GET /health (public, minimal), /status + /metrics (auth required, detailed)
-    api.js              — GET /dashboard (5s cache), /config, /logs (5s cache), /failed-evidences (5s cache); POST /backfill (backpressure), /retry-failed/:jobId, /test-telegram
+    api.js              — GET /dashboard (5s cache), /config, /logs (5s cache), /failed-evidences (5s cache), /pending-planos (5s cache); POST /backfill (backpressure), /retry-failed/:jobId, /upload-plano/:jobId, /test-telegram
     dlq.js              — GET /dlq (5s cache); POST /dlq/retry, /dlq/clear (cache invalidation)
   services/
     downloader.js        — Core download logic (atomic .part writes, exponential backoff, Supabase query timeout)
     folder-mover.js      — Move/copy/trash folders (1ACTIVOS → TERMINADOS), lock-protected collision resolution
+    plano-uploader.js    — Upload job blueprint PDF (FABRICACION) to mounting-orders bucket, set jobs.plans_url
     supabase.js          — Singleton Supabase client (service_role key)
   jobs/
-    bull-queue.js        — BullMQ queue/worker orchestrator (circuit breaker, stalled job detection)
+    bull-queue.js        — BullMQ queue/worker orchestrator (circuit breaker, stalled job detection). Events: job.approved | job.paid | job.plano
     polling.js           — Automatic polling every 30s (approved jobs + paid jobs for TERMINADOS)
     error-classifier.js  — Pure error classification (replaces inline string-matching)
-    metrics-tracker.js   — Job metrics (onCompleted, onFailed, addPhotos, getStatus)
+    metrics-tracker.js   — Job metrics (onCompleted, onFailed, addPhotos, addPlanos, getStatus)
     dlq-handler.js        — Dead letter queue operations (getFailedJobs, retryFailedJob, clearFailedJobs)
   middleware/
     api-auth.js          — Bearer token auth for /api/* routes (timing-safe)
@@ -133,6 +134,8 @@ npm run backfill:dry     # Dry-run retroactive download
 | HTML escaping in Telegram | Prevents HTML injection via error messages or filenames |
 | `MAX_COLLISIONS` in config | Was hardcoded in folder-mover.js; now configurable |
 | `SUPABASE_BUCKET` configurable | Was hardcoded as `'evidence'`; now configurable |
+| Plano upload to `mounting-orders` | Reverse flow (Server → Supabase). Reads PDFs starting with P-code from `FABRICACION/`, validates `%PDF-`+`%%EOF`, uploads up to 4 with `upsert:true`, verifies via `.exists()`, stores `plans_url` as JSON array of `{name,path}`. Auto-append: polling diffs FABRICACION vs `plans_url` (by name), enqueues only on new. `job.plano` re-enqueueable after `completed` (BullMQ dedup bypass for auto-append). |
+| `plans_url` as JSON array of `{name,path}` | Auto-append needs original names to diff. Lock `plano:<jobId>` prevents concurrent append. UPDATE is `WHERE id` (append, not `WHERE IS NULL`). |
 | Stalled job detection | Worker detects crashed jobs after 30s instead of BullMQ default |
 | Backpressure in `/backfill` | Rejects with 429 if queue has >= 200 pending jobs |
 | N+1 eliminated in `/failed-evidences` | 2 fixed queries instead of up to 201 per refresh |
@@ -143,17 +146,19 @@ npm run backfill:dry     # Dry-run retroactive download
 
 See `.env.example` for the full list. Critical vars:
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_BUCKET` — Supabase connection (bucket default: `evidence`)
+- `SUPABASE_PLANOS_BUCKET` — Bucket for job blueprints (default: `mounting-orders`, separate from `evidence`)
 - `API_TOKEN` — Bearer token for /api/* routes
 - `TRABAJOS_BASE_PATH` — Local SMB mount point
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` — BullMQ Redis connection
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — Alert notifications (optional)
+- `ENABLE_PLANO_UPLOAD`, `PLANO_SCAN_SUBFOLDER`, `PLANO_MAX_SIZE_MB`, `PLANO_UPLOAD_STATUSES` — Plano upload feature (Sprint 1+)
 
 ## Testing
 
 - **Framework**: Vitest (ESM-compatible)
 - **Runner**: `npm test` (single run) or `npm run test:watch`
 - **Coverage**: `npm run test:coverage` — includes `src/**/*.js`, excludes `src/public/**`
-- **Current count**: 227 tests across 23 files
+- **Current count**: 301 tests across 25 files
 - **Mocking strategy**: `injectMock` + `require.cache` pattern for CJS external modules (`bullmq`, `ioredis`); `vi.fn()` for simple mocks; integration tests spin up an actual Express server
 - **Pre-commit**: `husky` + `lint-staged` runs ESLint on `*.js` on every commit
 
@@ -184,6 +189,14 @@ Magic constants are centralized in `config.js`. Key exports beyond env vars:
 - `CIRCUIT_BREAKER_RESET_MS` — Time before circuit half-opens (default 30000)
 - `STALLED_INTERVAL_MS` — BullMQ stalled job check interval (default 30000)
 - `LOCK_DURATION_MS` — BullMQ job lock duration (default 60000)
+- `ENABLE_PLANO_UPLOAD` — Enable plano upload feature (default true)
+- `SUPABASE_PLANOS_BUCKET` — Bucket for planos (default `mounting-orders`)
+- `PLANO_SCAN_SUBFOLDER` — Project subfolder to scan for PDF (default `FABRICACION`)
+- `PLANO_MAX_SIZE_MB` — Max plano size; read to Buffer for validation (default 50)
+- `PLANO_MAX_PLANOS_PER_JOB` — Max planos per job; extras omitted with alert (default 4)
+- `PLANO_UPLOAD_STATUSES` — Job statuses to scan for plano upload (default `pending`)
+- `PROJECT_FOLDER_MAX_DEPTH` — Max depth when searching project folders (default 4)
+- `PLANO_INDEX_TTL_MS` — TTL of cached P-code→folder index (default 300000, reduces SMB readdir)
 
 ## Known Issues (Separate from Maintainability)
 

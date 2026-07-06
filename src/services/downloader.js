@@ -624,5 +624,6 @@ module.exports = {
   retryFailedEvidences,
   resolveUniqueFilename,
   cleanupOrphanedPartFiles,
-  findProjectFolderRecursive
+  findProjectFolderRecursive,
+  shouldScanDirectory
 };

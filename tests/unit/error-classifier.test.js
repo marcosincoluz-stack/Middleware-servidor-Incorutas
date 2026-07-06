@@ -45,6 +45,24 @@ describe('error-classifier', () => {
       expect(classifyError(err)).toEqual({ type: 'smb_disconnected', action: 'alert_smb' });
     });
 
+    it('clasifica EBUSY como file_lock (archivo bloqueado en SMB)', () => {
+      const err = new Error('EBUSY: resource busy or locked');
+      err.code = 'EBUSY';
+      expect(classifyError(err)).toEqual({ type: 'file_lock', action: 'retry' });
+    });
+
+    it('clasifica ELOCKED como file_lock', () => {
+      const err = new Error('ELOCKED: file is locked');
+      err.code = 'ELOCKED';
+      expect(classifyError(err)).toEqual({ type: 'file_lock', action: 'retry' });
+    });
+
+    it('clasifica EPERM como file_lock', () => {
+      const err = new Error('EPERM: operation not permitted');
+      err.code = 'EPERM';
+      expect(classifyError(err)).toEqual({ type: 'file_lock', action: 'retry' });
+    });
+
     it('código desconocido cae a fallback de message', () => {
       const err = new Error('Error accediendo a 1ACTIVOS/proyecto');
       err.code = 'EUNKNOWN_CODE';
@@ -113,6 +131,12 @@ describe('error-classifier', () => {
     it('contiene códigos NETWORK como array no vacío', () => {
       expect(Array.isArray(ERROR_CODES.NETWORK)).toBe(true);
       expect(ERROR_CODES.NETWORK.length).toBeGreaterThan(0);
+    });
+
+    it('contiene códigos FILE_LOCK como array no vacío', () => {
+      expect(Array.isArray(ERROR_CODES.FILE_LOCK)).toBe(true);
+      expect(ERROR_CODES.FILE_LOCK.length).toBeGreaterThan(0);
+      expect(ERROR_CODES.FILE_LOCK).toContain('EBUSY');
     });
   });
 

@@ -2,6 +2,7 @@ const ERROR_CODES = {
   DISK_FULL: ['ENOSPC'],
   SMB_DISCONNECTED: ['EACCES', 'ENOTDIR', 'EIO', 'ECONNREFUSED', 'EHOSTUNREACH'],
   NETWORK: ['ECONNRESET', 'ETIMEDOUT', 'EPIPE'],
+  FILE_LOCK: ['EBUSY', 'ELOCKED', 'EPERM'],
 };
 
 const ERROR_PATTERNS = {
@@ -13,10 +14,11 @@ const ACTION_MAP = {
   disk_full: 'alert_disk',
   smb_disconnected: 'alert_smb',
   network: 'retry',
+  file_lock: 'retry',
 };
 
 /**
- * @typedef {{ type: 'disk_full' | 'smb_disconnected' | 'network' | 'unknown', action: 'alert_disk' | 'alert_smb' | 'retry' | 'none' }} ClassifyResult
+ * @typedef {{ type: 'disk_full' | 'smb_disconnected' | 'network' | 'file_lock' | 'unknown', action: 'alert_disk' | 'alert_smb' | 'retry' | 'none' }} ClassifyResult
  */
 
 /**

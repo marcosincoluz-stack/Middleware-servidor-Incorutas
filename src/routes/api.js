@@ -9,6 +9,7 @@ const { supabase } = require('../services/supabase');
 const notify = require('../utils/notify');
 const { tailFile } = require('../utils/tail-file');
 const { retryFailedEvidences } = require('../services/downloader');
+const { processJobPlano } = require('../services/plano-uploader');
 const { retryFailedSchema } = require('../validations/retry');
 const pkg = require('../../package.json');
 const fs = require('fs');
@@ -21,6 +22,7 @@ router.use(verifyApiToken);
 let dashboardCache = { data: null, timestamp: 0 };
 let dashboardFetchInProgress = false;
 let failedEvidencesCache = { data: null, timestamp: 0 };
+let pendingPlanosCache = { data: null, timestamp: 0 };
 let logsCache = { data: null, timestamp: 0 };
 
 router.get('/dashboard', asyncHandler(async (req, res) => {
@@ -87,9 +89,11 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
         totalProcessed: queue.totalProcessed,
         totalErrors: queue.totalErrors,
         totalPhotos: queue.totalPhotos,
+        totalPlanos: queue.totalPlanos,
         sessionProcessed: queue.sessionProcessed,
         sessionErrors: queue.sessionErrors,
         sessionPhotos: queue.sessionPhotos,
+        sessionPlanos: queue.sessionPlanos,
         sessionRejectedByExtension: queue.sessionRejectedByExtension,
         currentJob: queue.currentJob,
         currentJobStartedAt: queue.currentJobStartedAt,
@@ -321,6 +325,66 @@ router.post('/retry-failed/:jobId', asyncHandler(async (req, res) => {
 
   const result = await retryFailedEvidences(jobId);
   failedEvidencesCache = { data: null, timestamp: 0 };
+  res.json({ success: true, ...result });
+}));
+
+router.get('/pending-planos', asyncHandler(async (req, res) => {
+  const now = Date.now();
+  if (pendingPlanosCache.data && (now - pendingPlanosCache.timestamp) < config.SECONDARY_CACHE_TTL_MS) {
+    return res.json(pendingPlanosCache.data);
+  }
+
+  if (!Array.isArray(config.PLANO_UPLOAD_STATUSES) || config.PLANO_UPLOAD_STATUSES.length === 0) {
+    const data = { success: true, jobs: [] };
+    pendingPlanosCache = { data, timestamp: Date.now() };
+    return res.json(data);
+  }
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Timeout consultando Supabase')), 5000)
+  );
+
+  const queryPromise = (async () => {
+    const { data: jobs, error } = await supabase
+      .from('jobs')
+      .select('id, title, status, plans_url, created_at')
+      .in('status', config.PLANO_UPLOAD_STATUSES)
+      .is('plans_url', null)
+      .order('created_at', { ascending: true })
+      .limit(config.BACKFILL_MAX_JOBS);
+
+    if (error) throw error;
+
+    const result = (jobs || []).map(job => ({
+      jobId: job.id,
+      title: job.title,
+      status: job.status,
+      createdAt: job.created_at
+    }));
+
+    return { success: true, jobs: result };
+  })();
+
+  try {
+    const data = await Promise.race([queryPromise, timeoutPromise]);
+    pendingPlanosCache = { data, timestamp: Date.now() };
+    res.json(data);
+  } catch (err) {
+    pendingPlanosCache = { data: null, timestamp: 0 };
+    throw err;
+  }
+}));
+
+router.post('/upload-plano/:jobId', asyncHandler(async (req, res) => {
+  const parsed = retryFailedSchema.safeParse({ jobId: req.params.jobId });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues.map(i => i.message).join(', ') });
+  }
+  const { jobId } = parsed.data;
+  logger.info(`👤 Petición de subida manual de plano para Job ${jobId} desde el Dashboard`);
+
+  const result = await processJobPlano(jobId, '');
+  pendingPlanosCache = { data: null, timestamp: 0 };
   res.json({ success: true, ...result });
 }));
 

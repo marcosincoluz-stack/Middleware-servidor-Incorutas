@@ -111,8 +111,10 @@ npm run backfill:dry   # Simulación de descarga retroactiva
 | `GET` | `/api/dashboard` | Sí | Datos del dashboard |
 | `GET` | `/api/logs` | Sí | Últimas líneas de log |
 | `GET` | `/api/dlq` | Sí | Jobs fallidos (Dead-Letter Queue) |
+| `GET` | `/api/pending-planos` | Sí | Jobs pendientes sin plano subido |
 | `POST` | `/api/backfill` | Sí | Forzar descarga retroactiva |
 | `POST` | `/api/retry-failed/:jobId` | Sí | Reintentar fotos fallidas de un job |
+| `POST` | `/api/upload-plano/:jobId` | Sí | Subir manualmente el plano de un job |
 
 Autenticación mediante cabecera `Authorization: Bearer <API_TOKEN>`.
 
@@ -169,7 +171,7 @@ Alertas automáticas para: disco lleno, SMB desmontado, jobs fallidos, polling c
 npm test
 ```
 
-227 tests en 23 archivos. Cobertura con `npm run test:coverage`. Pre-commit hook con ESLint vía husky + lint-staged.
+Suite de tests con Vitest (conteo actualizado en `AGENTS.md`). Cobertura con `npm run test:coverage`. Pre-commit hook con ESLint vía husky + lint-staged.
 
 ---
 
