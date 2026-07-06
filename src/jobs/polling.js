@@ -243,18 +243,36 @@ async function pollPlanosJobs() {
     return { found: 0, enqueued: 0, skipped: 0 };
   }
 
-  const { data: jobs, error } = await withTimeout(
+  const { data: noPlanoJobs, error: err1 } = await withTimeout(
     supabase
       .from('jobs')
       .select('id, title, plans_url')
       .in('status', config.PLANO_UPLOAD_STATUSES)
+      .is('plans_url', null)
       .order('created_at', { ascending: true })
       .limit(config.BACKFILL_MAX_JOBS)
   );
 
-  if (error) throw error;
+  if (err1) throw err1;
 
-  if (!jobs || jobs.length === 0) {
+  let jobs = noPlanoJobs || [];
+
+  if (jobs.length < config.BACKFILL_MAX_JOBS) {
+    const slots = config.BACKFILL_MAX_JOBS - jobs.length;
+    const { data: hasPlanoJobs, error: err2 } = await withTimeout(
+      supabase
+        .from('jobs')
+        .select('id, title, plans_url')
+        .in('status', config.PLANO_UPLOAD_STATUSES)
+        .not('plans_url', 'is', null)
+        .order('created_at', { ascending: true })
+        .limit(slots)
+    );
+    if (err2) throw err2;
+    jobs = jobs.concat(hasPlanoJobs || []);
+  }
+
+  if (jobs.length === 0) {
     return { found: 0, enqueued: 0, skipped: 0 };
   }
 

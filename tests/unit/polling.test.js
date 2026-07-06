@@ -467,12 +467,30 @@ describe('polling module', () => {
       delete config.PLANO_MAX_PLANOS_PER_JOB;
     });
 
-    function mockJobsQuery(jobs) {
-      const mockLimit = vi.fn().mockResolvedValue({ data: jobs, error: null });
-      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
-      const mockIn = vi.fn().mockReturnValue({ order: mockOrder });
-      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
-      mockFrom.mockReturnValue({ select: mockSelect });
+    function mockJobsQueryTwoTier(noPlanoJobs, hasPlanoJobs) {
+      const limit1 = vi.fn().mockResolvedValue({ data: noPlanoJobs, error: null });
+      const limit2 = vi.fn().mockResolvedValue({ data: hasPlanoJobs, error: null });
+      mockFrom.mockImplementation((table) => {
+        if (table !== 'jobs') return {};
+        return {
+          select: () => ({
+            in: () => ({
+              is: () => ({ order: () => ({ limit: limit1 }) }),
+              not: () => ({ order: () => ({ limit: limit2 }) })
+            })
+          })
+        };
+      });
+    }
+
+    function mockJobsQueryError(message) {
+      mockFrom.mockImplementation(() => ({
+        select: () => ({
+          in: () => ({
+            is: () => ({ order: () => ({ limit: vi.fn().mockResolvedValue({ data: null, error: { message } }) }) })
+          })
+        })
+      }));
     }
 
     it('debería devolver ceros sin consultar Supabase si ENABLE_PLANO_UPLOAD es false', async () => {
@@ -508,7 +526,7 @@ describe('polling module', () => {
 
     it('debería devolver ceros si no hay jobs pending', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([]);
+      mockJobsQueryTwoTier([], []);
 
       const result = await pollPlanosJobs();
 
@@ -518,7 +536,7 @@ describe('polling module', () => {
 
     it('debería encolar job.plano si hay planos nuevos (diff: 1 subido, 2 en carpeta)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - viejo.pdf"}]' }]);
+      mockJobsQueryTwoTier([], [{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - viejo.pdf"}]' }]);
 
       mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
       mockParsePlansUrl.mockReturnValue([{ name: 'P260251 - viejo.pdf', path: 'planos_job-1_P260251 - viejo.pdf' }]);
@@ -538,7 +556,7 @@ describe('polling module', () => {
 
     it('debería skip si todos los planos ya están subidos (up_to_date)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - x.pdf"}]' }]);
+      mockJobsQueryTwoTier([], [{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{"name":"P260251 - x.pdf"}]' }]);
 
       mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
       mockParsePlansUrl.mockReturnValue([{ name: 'P260251 - x.pdf', path: 'planos_job-1_x.pdf' }]);
@@ -554,7 +572,7 @@ describe('polling module', () => {
 
     it('debería skip sin hacer readdir si el job ya tiene 4 planos (máximo)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{}]' }]);
+      mockJobsQueryTwoTier([], [{ id: 'job-1', title: 'P260251 - Obra A', plans_url: '[{}]' }]);
 
       mockParsePlansUrl.mockReturnValue([
         { name: 'a.pdf', path: 'p1' },
@@ -573,7 +591,7 @@ describe('polling module', () => {
 
     it('debería skip jobs cuya carpeta no está en el índice (sin plano listo)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }]);
+      mockJobsQueryTwoTier([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }], []);
 
       mockGetProjectFolderIndex.mockResolvedValue(new Map());
       mockParsePlansUrl.mockReturnValue([]);
@@ -590,7 +608,7 @@ describe('polling module', () => {
 
     it('debería skip jobs con FABRICACION sin PDFs que matcheen', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }]);
+      mockJobsQueryTwoTier([{ id: 'job-1', title: 'P260251 - Obra A', plans_url: null }], []);
 
       mockGetProjectFolderIndex.mockResolvedValue(new Map([['P260251', '/tmp/fake/P260251']]));
       mockParsePlansUrl.mockReturnValue([]);
@@ -606,7 +624,7 @@ describe('polling module', () => {
 
     it('debería skip jobs cuyo título no tiene código P válido', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      mockJobsQuery([{ id: 'job-1', title: 'Sin Codigo', plans_url: null }]);
+      mockJobsQueryTwoTier([{ id: 'job-1', title: 'Sin Codigo', plans_url: null }], []);
 
       mockGetProjectFolderIndex.mockResolvedValue(new Map());
 
@@ -619,11 +637,7 @@ describe('polling module', () => {
 
     it('debería lanzar el error de Supabase (lo captura runPollCycle)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
-      const mockLimit = vi.fn().mockResolvedValue({ data: null, error: { message: 'Supabase error' } });
-      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
-      const mockIn = vi.fn().mockReturnValue({ order: mockOrder });
-      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
-      mockFrom.mockReturnValue({ select: mockSelect });
+      mockJobsQueryError('Supabase error');
 
       await expect(pollPlanosJobs()).rejects.toThrow(/Supabase error/);
     });
