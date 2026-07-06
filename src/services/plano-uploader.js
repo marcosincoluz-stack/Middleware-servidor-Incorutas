@@ -282,41 +282,7 @@ async function uploadPlanoToStorage(jobId, pdfName, fabricacionPath) {
   return { name: pdfName, path: storagePath };
 }
 
-/**
- * Reemplaza plans_url en la tabla jobs con el array serializado completo (append).
- * Usa compare-and-swap (CAS): el UPDATE solo afecta la fila si plans_url sigue
- * siendo igual al valor leído al inicio (expectedOldValue). Si otro proceso appendó
- * entretanto, 0 filas afectadas → el caller trata la raza (el polling re-detecta y
- * reintenta en el siguiente ciclo; los objetos ya subidos son idempotentes por upsert).
- *
- * @param {string} jobId ID del trabajo
- * @param {Array<{name: string, path: string}>} plansArray Array completo (viejos + nuevos)
- * @param {string|null} expectedOldValue Valor de plans_url leído al inicio (para CAS)
- * @returns {Promise<boolean>} true si se actualizó, false si CAS falló (raza)
- */
-async function updatePlansUrl(jobId, plansArray, expectedOldValue) {
-  let query = supabase
-    .from('jobs')
-    .update({ plans_url: JSON.stringify(plansArray) })
-    .eq('id', jobId);
 
-  if (expectedOldValue === null || expectedOldValue === undefined) {
-    query = query.is('plans_url', null);
-  } else {
-    query = query.eq('plans_url', expectedOldValue);
-  }
-
-  const { data, error } = await withTimeout(
-    query.select('id'),
-    SUPABASE_QUERY_TIMEOUT_MS
-  );
-
-  if (error) {
-    throw new Error(`Error actualizando plans_url para job ${jobId}: ${error.message}`);
-  }
-
-  return Array.isArray(data) && data.length > 0;
-}
 
 /**
  * Procesa la subida de planos de un job con auto-append:
@@ -409,16 +375,23 @@ async function processJobPlano(jobId, jobTitle) {
       uploadedEntries.push(entry);
     }
 
-    const mergedArray = [...existingPlans, ...uploadedEntries];
-    const updated = await updatePlansUrl(jobId, mergedArray, job.plans_url);
-
-    if (!updated) {
-      logger.warn(`[PlanoUploader] Job ${jobId}: CAS falló (plans_url fue modificado por otro proceso entre la lectura y el UPDATE). Objetos subidos quedaron en Storage (idempotentes por upsert); el polling re-detectará y reintenta en el siguiente ciclo.`);
-      return { skipped: true, reason: 'race_condition_resolved' };
+    for (const entry of uploadedEntries) {
+      const { error: rpcError } = await withTimeout(
+        supabase.rpc('append_plano', {
+          p_job_id: jobId,
+          p_name: entry.name,
+          p_path: entry.path
+        }),
+        SUPABASE_QUERY_TIMEOUT_MS
+      );
+      if (rpcError) {
+        throw new Error(`Error en RPC append_plano para job ${jobId}: ${rpcError.message}`);
+      }
     }
 
     metricsTracker.addPlanos(uploadedEntries.length);
-    logger.info(`[PlanoUploader] Job ${jobId}: ${uploadedEntries.length} plano(s) subido(s) y registrado(s). Total: ${mergedArray.length}.`);
+    const totalPlanos = existingPlans.length + uploadedEntries.length;
+    logger.info(`[PlanoUploader] Job ${jobId}: ${uploadedEntries.length} plano(s) subido(s) y registrado(s) via RPC. Total: ${totalPlanos}.`);
     return { uploaded: uploadedEntries.length, paths: uploadedEntries.map(e => e.path) };
   } finally {
     await lockProvider.release(jobLockKey);
@@ -518,8 +491,6 @@ module.exports = {
   parsePlansUrl,
   normalizeAscii,
   validatePdfBuffer,
-  uploadPlanoToStorage,
-  updatePlansUrl,
   buildProjectFolderIndex,
   getProjectFolderIndex,
   invalidateProjectFolderIndex

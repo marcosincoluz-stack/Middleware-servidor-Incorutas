@@ -14,9 +14,12 @@ const mockStorageFrom = vi.fn(() => ({
   remove: mockRemove,
 }));
 
+const mockRpc = vi.fn();
+
 const mockSupabase = {
   from: (table) => mockFrom(table),
   storage: { from: mockStorageFrom },
+  rpc: (...args) => mockRpc(...args),
 };
 
 const mockMetricsTracker = {
@@ -100,6 +103,7 @@ describe('plano-uploader service', () => {
     mockUpload.mockReset();
     mockExists.mockReset();
     mockRemove.mockReset();
+    mockRpc.mockReset();
     mockMetricsTracker.addPlanos.mockReset();
     mockStorageFrom.mockImplementation(() => ({
       upload: mockUpload,
@@ -331,7 +335,7 @@ describe('plano-uploader service', () => {
       expect(mockUpload).not.toHaveBeenCalled();
     });
 
-    it('sube 1 plano nuevo (plans_url null) y hace UPDATE con el array', async () => {
+    it('sube 1 plano nuevo (plans_url null) y registra via RPC', async () => {
       await mkdirIfMissing(FABRICACION);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - plano.pdf'), VALID_PDF);
 
@@ -339,16 +343,11 @@ describe('plano-uploader service', () => {
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
 
-      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
-      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
-
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
 
+      mockRpc.mockResolvedValue({ data: null, error: null });
       mockUpload.mockResolvedValue({ data: { path: 'planos_job-1_P260251 - plano.pdf' }, error: null });
       mockExists.mockResolvedValue({ data: true, error: null });
 
@@ -361,17 +360,15 @@ describe('plano-uploader service', () => {
         { upsert: true, contentType: 'application/pdf' }
       );
       expect(mockExists).toHaveBeenCalledWith('planos_job-1_P260251 - plano.pdf');
-      expect(mockUpdate).toHaveBeenCalled();
-      const updateArg = mockUpdate.mock.calls[0][0];
-      expect(updateArg).toHaveProperty('plans_url');
-      const parsed = JSON.parse(updateArg.plans_url);
-      expect(parsed).toHaveLength(1);
-      expect(parsed[0].name).toBe('P260251 - plano.pdf');
-      expect(parsed[0].path).toBe('planos_job-1_P260251 - plano.pdf');
+      expect(mockRpc).toHaveBeenCalledWith('append_plano', {
+        p_job_id: 'job-1',
+        p_name: 'P260251 - plano.pdf',
+        p_path: 'planos_job-1_P260251 - plano.pdf'
+      });
       expect(mockMetricsTracker.addPlanos).toHaveBeenCalledWith(1);
     });
 
-    it('hace auto-append: sube solo el plano nuevo y preserva los viejos en el array', async () => {
+    it('hace auto-append: sube solo el plano nuevo y registra via RPC', async () => {
       await mkdirIfMissing(FABRICACION);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - viejo.pdf'), VALID_PDF);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - nuevo.pdf'), VALID_PDF);
@@ -383,16 +380,11 @@ describe('plano-uploader service', () => {
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
 
-      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
-      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
-
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
 
+      mockRpc.mockResolvedValue({ data: null, error: null });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockResolvedValue({ data: true, error: null });
 
@@ -401,10 +393,12 @@ describe('plano-uploader service', () => {
       expect(result.uploaded).toBe(1);
       expect(mockUpload).toHaveBeenCalledTimes(1);
       expect(mockUpload).toHaveBeenCalledWith('planos_job-1_P260251 - nuevo.pdf', expect.any(Buffer), expect.any(Object));
-      const parsed = JSON.parse(mockUpdate.mock.calls[0][0].plans_url);
-      expect(parsed).toHaveLength(2);
-      expect(parsed[0].name).toBe('P260251 - viejo.pdf');
-      expect(parsed[1].name).toBe('P260251 - nuevo.pdf');
+      expect(mockRpc).toHaveBeenCalledTimes(1);
+      expect(mockRpc).toHaveBeenCalledWith('append_plano', {
+        p_job_id: 'job-1',
+        p_name: 'P260251 - nuevo.pdf',
+        p_path: 'planos_job-1_P260251 - nuevo.pdf'
+      });
       expect(mockMetricsTracker.addPlanos).toHaveBeenCalledWith(1);
     });
 
@@ -419,14 +413,10 @@ describe('plano-uploader service', () => {
       const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
-      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
-      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
+      mockRpc.mockResolvedValue({ data: null, error: null });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockResolvedValue({ data: true, error: null });
 
@@ -434,57 +424,47 @@ describe('plano-uploader service', () => {
 
       expect(result.uploaded).toBe(4);
       expect(mockUpload).toHaveBeenCalledTimes(4);
-      const parsed = JSON.parse(mockUpdate.mock.calls[0][0].plans_url);
-      expect(parsed).toHaveLength(4);
+      expect(mockRpc).toHaveBeenCalledTimes(4);
       config.PLANO_MAX_PLANOS_PER_JOB = orig;
     });
 
-    it('resuelve raza CAS si plans_url fue modificado por otro proceso (race_condition_resolved)', async () => {
+    it('lanza error si el RPC falla (no actualiza BD)', async () => {
       await mkdirIfMissing(FABRICACION);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - nuevo.pdf'), VALID_PDF);
 
-      const existingArray = [{ name: 'P260251 - viejo.pdf', path: 'planos_job-1_viejo.pdf' }];
-      const plansUrl = JSON.stringify(existingArray);
-
-      const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: plansUrl }, error: null });
+      const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
 
-      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [], error: null });
-      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
-      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
-
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockResolvedValue({ data: true, error: null });
+      mockRpc.mockResolvedValue({ data: null, error: { message: 'RPC failure' } });
 
-      const result = await processJobPlano('job-1', 'P260251 - Test');
-      expect(result).toEqual({ skipped: true, reason: 'race_condition_resolved' });
+      await expect(processJobPlano('job-1', 'P260251 - Test'))
+        .rejects.toThrow(/Error en RPC append_plano/);
       expect(mockUpload).toHaveBeenCalledTimes(1);
       expect(mockMetricsTracker.addPlanos).not.toHaveBeenCalled();
     });
 
-    it('lanza error si la verificación exists falla (no actualiza BD)', async () => {
+    it('lanza error si la verificación exists falla (no llama RPC)', async () => {
       await mkdirIfMissing(FABRICACION);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - plano.pdf'), VALID_PDF);
 
       const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
-      const mockUpdate = vi.fn();
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockResolvedValue({ data: false, error: null });
 
       await expect(processJobPlano('job-1', 'P260251 - Test'))
         .rejects.toThrow(/Verificación post-subida fallida/);
-      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockRpc).not.toHaveBeenCalled();
     });
 
     it('lanza error si la subida a Storage falla', async () => {
@@ -523,22 +503,21 @@ describe('plano-uploader service', () => {
         .rejects.toThrow(/no comienza con un código de proyecto válido/);
     });
 
-    it('falla a seguro si .exists() lanza un error de red (no actualiza BD)', async () => {
+    it('falla a seguro si .exists() lanza un error de red (no llama RPC)', async () => {
       await mkdirIfMissing(FABRICACION);
       await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - plano.pdf'), VALID_PDF);
       const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
-      const mockUpdate = vi.fn();
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockRejectedValue(new Error('Network error during HEAD'));
 
       await expect(processJobPlano('job-1', 'P260251 - Test'))
         .rejects.toThrow(/Verificación post-subida fallida/);
-      expect(mockUpdate).not.toHaveBeenCalled();
+      expect(mockRpc).not.toHaveBeenCalled();
     });
 
     it('rechaza un plano que excede el tamaño máximo', async () => {
@@ -567,14 +546,10 @@ describe('plano-uploader service', () => {
       const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
-      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
-      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
-      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
       mockFrom.mockImplementation((table) => {
-        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+        if (table === 'jobs') return { select: mockSelect };
       });
+      mockRpc.mockResolvedValue({ data: null, error: null });
       mockUpload.mockResolvedValue({ data: {}, error: null });
       mockExists.mockResolvedValue({ data: true, error: null });
 
@@ -586,9 +561,11 @@ describe('plano-uploader service', () => {
         expect.any(Buffer),
         { upsert: true, contentType: 'application/pdf' }
       );
-      const parsed = JSON.parse(mockUpdate.mock.calls[0][0].plans_url);
-      expect(parsed[0].name).toBe('P260251 - RÓTULO SABIÑANIGO PROVENÇA.pdf');
-      expect(parsed[0].path).toBe('planos_job-1_P260251 - ROTULO SABINANIGO PROVENCA.pdf');
+      expect(mockRpc).toHaveBeenCalledWith('append_plano', {
+        p_job_id: 'job-1',
+        p_name: 'P260251 - RÓTULO SABIÑANIGO PROVENÇA.pdf',
+        p_path: 'planos_job-1_P260251 - ROTULO SABINANIGO PROVENCA.pdf'
+      });
     });
   });
 
