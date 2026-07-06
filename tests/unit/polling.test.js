@@ -475,8 +475,8 @@ describe('polling module', () => {
         return {
           select: () => ({
             in: () => ({
-              is: () => ({ order: () => ({ limit: limit1 }) }),
-              not: () => ({ order: () => ({ limit: limit2 }) })
+              is: () => ({ is: () => ({ order: () => ({ limit: limit1 }) }) }),
+              not: () => ({ is: () => ({ order: () => ({ limit: limit2 }) }) })
             })
           })
         };
@@ -487,7 +487,7 @@ describe('polling module', () => {
       mockFrom.mockImplementation(() => ({
         select: () => ({
           in: () => ({
-            is: () => ({ order: () => ({ limit: vi.fn().mockResolvedValue({ data: null, error: { message } }) }) })
+            is: () => ({ is: () => ({ order: () => ({ limit: vi.fn().mockResolvedValue({ data: null, error: { message } }) }) }) })
           })
         })
       }));

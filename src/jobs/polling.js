@@ -249,6 +249,7 @@ async function pollPlanosJobs() {
       .select('id, title, plans_url')
       .in('status', config.PLANO_UPLOAD_STATUSES)
       .is('plans_url', null)
+      .is('deleted_at', null)
       .order('created_at', { ascending: true })
       .limit(config.BACKFILL_MAX_JOBS)
   );
@@ -265,6 +266,7 @@ async function pollPlanosJobs() {
         .select('id, title, plans_url')
         .in('status', config.PLANO_UPLOAD_STATUSES)
         .not('plans_url', 'is', null)
+        .is('deleted_at', null)
         .order('created_at', { ascending: true })
         .limit(slots)
     );

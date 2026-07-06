@@ -273,6 +273,22 @@ describe('plano-uploader service', () => {
       expect(mockUpload).not.toHaveBeenCalled();
     });
 
+    it('omite si el job está soft-deleted (deleted_at seteado)', async () => {
+      const mockSingle = vi.fn().mockResolvedValue({
+        data: { id: 'job-1', title: 'P260251 - Test', plans_url: null, deleted_at: '2026-07-06T10:47:02Z' },
+        error: null,
+      });
+      const mockEq = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelect };
+      });
+
+      const result = await processJobPlano('job-1', 'P260251 - Test');
+      expect(result).toEqual({ skipped: true, reason: 'job_deleted' });
+      expect(mockUpload).not.toHaveBeenCalled();
+    });
+
     it('omite si el job ya tiene el máximo de planos (sin readdir)', async () => {
       const plansUrl = JSON.stringify([
         { name: 'P260251 - a.pdf', path: 'planos_j_1.pdf' },

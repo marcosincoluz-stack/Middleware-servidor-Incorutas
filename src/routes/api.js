@@ -350,6 +350,7 @@ router.get('/pending-planos', asyncHandler(async (req, res) => {
       .select('id, title, status, plans_url, created_at')
       .in('status', config.PLANO_UPLOAD_STATUSES)
       .is('plans_url', null)
+      .is('deleted_at', null)
       .order('created_at', { ascending: true })
       .limit(config.BACKFILL_MAX_JOBS);
 

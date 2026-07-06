@@ -359,6 +359,11 @@ async function processJobPlano(jobId, jobTitle) {
     }
     if (jobError) throw jobError;
 
+    if (job.deleted_at) {
+      logger.info(`[PlanoUploader] Job ${jobId} está soft-deleted (deleted_at=${job.deleted_at}). Omitiendo.`);
+      return { skipped: true, reason: 'job_deleted' };
+    }
+
     const existingPlans = parsePlansUrl(job.plans_url);
     const uploadedNames = new Set(existingPlans.filter(e => e.name).map(e => e.name));
     const alreadyUploadedCount = existingPlans.length;
