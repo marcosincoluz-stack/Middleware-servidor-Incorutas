@@ -396,7 +396,6 @@ async function runPollCycle() {
       planoStalledCount++;
       const { metricsTracker } = require('./metrics-tracker');
       metricsTracker.planoStalledCycles = planoStalledCount;
-      await maybeAlertPollingFailure(planoStalledCount, `${planoResult.found} candidatos, 0 encolados`, 'planos-stalled', lastPlanoStalledAlert, (ts) => { lastPlanoStalledAlert = ts; });
     } else {
       planoStalledCount = 0;
       const { metricsTracker } = require('./metrics-tracker');
