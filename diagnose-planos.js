@@ -43,7 +43,8 @@ const { getProjectFolderIndex, invalidateProjectFolderIndex, listMatchingPdfs, l
       try { deep = await resolveFabricacionFolder(job.title); } catch { deep = null; }
       if (deep) {
         stats.index_miss_deep_found++;
-        if (indexMiss.length < 10) indexMiss.push(`${pcode} - ${(job.title||'').slice(0,50)} (encontrado por deep search, NO en index)`);
+        const root = deep.includes('TERMINADOS') ? 'TERMINADOS' : (deep.includes('1ACTIVOS') ? '1ACTIVOS' : '???');
+        indexMiss.push(`${pcode} | ${root} | ${(job.title||'').slice(0,55)}`);
         folderPath = deep;
       } else {
         stats.no_folder++;
@@ -75,7 +76,8 @@ const { getProjectFolderIndex, invalidateProjectFolderIndex, listMatchingPdfs, l
   console.log('  PDFs que SÍ matchean (deberían subir):', stats.has_match, stats.has_match > 0 ? '⚠️ EL POLLING DEBERÍA ENCOLARLOS' : '');
 
   if (indexMiss.length > 0) {
-    console.log('\n--- INDEX MISS (el polling no los encuentra pero el botón manual sí) ---');
+    console.log('\n--- INDEX MISS (el polling no los encuentra en 1ACTIVOS; el deep search sí) ---');
+    console.log('  P-code | root | título');
     indexMiss.forEach(s => console.log('  -', s));
   }
   if (noMatch.length > 0) {
