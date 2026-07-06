@@ -24,6 +24,19 @@ const FABRICACION_READDIR_TIMEOUT_MS = 5000;
 const PDF_MAGIC = '%PDF-';
 const PDF_EOF = '%%EOF';
 
+/**
+ * Normaliza un string a ASCII eliminando acentos/diacríticos.
+ * Supabase Storage rechaza keys con caracteres no-ASCII (RÓTULO -> Invalid key).
+ * Ej: "QUIRÓN PREVENCIÓN" -> "QUIRON PREVENCION", "SABIÑANIGO" -> "SABINANIGO".
+ *
+ * @param {string} str Texto a normalizar
+ * @returns {string} Texto solo-ASCII
+ */
+function normalizeAscii(str) {
+  if (typeof str !== 'string') return '';
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function withTimeout(promise, ms) {
   let timer;
   const timeoutPromise = new Promise((_, reject) => {
@@ -232,7 +245,7 @@ async function uploadPlanoToStorage(jobId, pdfName, fabricacionPath) {
   const buffer = await fs.promises.readFile(filePath);
   validatePdfBuffer(buffer);
 
-  const storagePath = `planos_${jobId}_${sanitizeFilename(pdfName)}`;
+  const storagePath = `planos_${jobId}_${normalizeAscii(sanitizeFilename(pdfName))}`;
 
   logger.info(`[PlanoUploader] Subiendo "${pdfName}" (${(stat.size / 1024).toFixed(1)} KB) a ${config.SUPABASE_PLANOS_BUCKET}/${storagePath}`);
 

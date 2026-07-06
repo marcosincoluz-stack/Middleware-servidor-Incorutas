@@ -471,6 +471,35 @@ describe('plano-uploader service', () => {
       expect(mockUpload).not.toHaveBeenCalled();
       config.PLANO_MAX_SIZE_MB = orig;
     });
+
+    it('normaliza acentos en el storage key (Ó→O, Ñ→N, Ç→C) manteniendo el name original', async () => {
+      await mkdirIfMissing(FABRICACION);
+      await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - RÓTULO SABIÑANIGO PROVENÇA.pdf'), VALID_PDF);
+
+      const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: null }, error: null });
+      const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
+      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
+      const mockEqUpdate = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+      });
+      mockUpload.mockResolvedValue({ data: {}, error: null });
+      mockExists.mockResolvedValue({ data: true, error: null });
+
+      const result = await processJobPlano('job-1', 'P260251 - Test');
+
+      expect(result.uploaded).toBe(1);
+      expect(mockUpload).toHaveBeenCalledWith(
+        'planos_job-1_P260251 - ROTULO SABINANIGO PROVENCA.pdf',
+        expect.any(Buffer),
+        { upsert: true, contentType: 'application/pdf' }
+      );
+      const parsed = JSON.parse(mockUpdate.mock.calls[0][0].plans_url);
+      expect(parsed[0].name).toBe('P260251 - RÓTULO SABIÑANIGO PROVENÇA.pdf');
+      expect(parsed[0].path).toBe('planos_job-1_P260251 - ROTULO SABINANIGO PROVENCA.pdf');
+    });
   });
 
   describe('buildProjectFolderIndex', () => {
