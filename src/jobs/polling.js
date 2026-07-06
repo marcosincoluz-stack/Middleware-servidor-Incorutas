@@ -355,9 +355,11 @@ let pollInterval = null;
 let approvedFailCount = 0;
 let paidFailCount = 0;
 let planoFailCount = 0;
+let planoStalledCount = 0;
 let lastApprovedAlert = 0;
 let lastPaidAlert = 0;
 let lastPlanoAlert = 0;
+let lastPlanoStalledAlert = 0;
 let isPolling = false;
 
 async function runPollCycle() {
@@ -386,8 +388,18 @@ async function runPollCycle() {
   }
 
   try {
-    await pollPlanosJobs();
+    const planoResult = await pollPlanosJobs();
     planoFailCount = 0;
+    if (planoResult.found > 0 && planoResult.enqueued === 0) {
+      planoStalledCount++;
+      const { metricsTracker } = require('./metrics-tracker');
+      metricsTracker.planoStalledCycles = planoStalledCount;
+      await maybeAlertPollingFailure(planoStalledCount, `${planoResult.found} candidatos, 0 encolados`, 'planos-stalled', lastPlanoStalledAlert, (ts) => { lastPlanoStalledAlert = ts; });
+    } else {
+      planoStalledCount = 0;
+      const { metricsTracker } = require('./metrics-tracker');
+      metricsTracker.planoStalledCycles = 0;
+    }
   } catch (err) {
     logger.error(`[Polling] Error en ciclo planos: ${err.message}`);
     planoFailCount++;

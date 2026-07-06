@@ -64,6 +64,7 @@ const {
   selectPlanoPdfs,
   parsePlansUrl,
   validatePdfBuffer,
+  normalizeAscii,
   buildProjectFolderIndex,
   getProjectFolderIndex,
   invalidateProjectFolderIndex,
@@ -144,6 +145,29 @@ describe('plano-uploader service', () => {
         { name: null, path: 'planos_x_1.pdf' },
         { name: null, path: 'planos_x_2.pdf' },
       ]);
+    });
+  });
+
+  describe('normalizeAscii', () => {
+    it('strips acentos del español (ÁÉÍÓÚ, Ñ, Ç, Ü)', () => {
+      expect(normalizeAscii('RÓTULO')).toBe('ROTULO');
+      expect(normalizeAscii('QUIRÓN PREVENCIÓN')).toBe('QUIRON PREVENCION');
+      expect(normalizeAscii('SABIÑANIGO')).toBe('SABINANIGO');
+      expect(normalizeAscii('PROVENÇA')).toBe('PROVENCA');
+      expect(normalizeAscii('BENALMÁDENA')).toBe('BENALMADENA');
+      expect(normalizeAscii('PLAFÓN')).toBe('PLAFON');
+      expect(normalizeAscii('CAMPIÑA')).toBe('CAMPINA');
+      expect(normalizeAscii('GÜIMAR')).toBe('GUIMAR');
+    });
+
+    it('no altera ASCII puro', () => {
+      expect(normalizeAscii('P260086 - GABANA AMPLIACION')).toBe('P260086 - GABANA AMPLIACION');
+    });
+
+    it('devuelve string vacío para input no-string', () => {
+      expect(normalizeAscii(null)).toBe('');
+      expect(normalizeAscii(undefined)).toBe('');
+      expect(normalizeAscii(123)).toBe('');
     });
   });
 
@@ -287,7 +311,9 @@ describe('plano-uploader service', () => {
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
 
       const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqUpdate = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
 
       mockFrom.mockImplementation((table) => {
@@ -329,7 +355,9 @@ describe('plano-uploader service', () => {
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
 
       const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqUpdate = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
 
       mockFrom.mockImplementation((table) => {
@@ -363,7 +391,9 @@ describe('plano-uploader service', () => {
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
       const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqUpdate = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
       mockFrom.mockImplementation((table) => {
         if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
@@ -378,6 +408,35 @@ describe('plano-uploader service', () => {
       const parsed = JSON.parse(mockUpdate.mock.calls[0][0].plans_url);
       expect(parsed).toHaveLength(4);
       config.PLANO_MAX_PLANOS_PER_JOB = orig;
+    });
+
+    it('resuelve raza CAS si plans_url fue modificado por otro proceso (race_condition_resolved)', async () => {
+      await mkdirIfMissing(FABRICACION);
+      await fs.promises.writeFile(path.join(FABRICACION, 'P260251 - nuevo.pdf'), VALID_PDF);
+
+      const existingArray = [{ name: 'P260251 - viejo.pdf', path: 'planos_job-1_viejo.pdf' }];
+      const plansUrl = JSON.stringify(existingArray);
+
+      const mockSingle = vi.fn().mockResolvedValue({ data: { id: 'job-1', title: 'P260251 - Test', plans_url: plansUrl }, error: null });
+      const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
+
+      const mockSelectAfter = vi.fn().mockResolvedValue({ data: [], error: null });
+      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
+      const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
+
+      mockFrom.mockImplementation((table) => {
+        if (table === 'jobs') return { select: mockSelect, update: mockUpdate };
+      });
+      mockUpload.mockResolvedValue({ data: {}, error: null });
+      mockExists.mockResolvedValue({ data: true, error: null });
+
+      const result = await processJobPlano('job-1', 'P260251 - Test');
+      expect(result).toEqual({ skipped: true, reason: 'race_condition_resolved' });
+      expect(mockUpload).toHaveBeenCalledTimes(1);
+      expect(mockMetricsTracker.addPlanos).not.toHaveBeenCalled();
     });
 
     it('lanza error si la verificación exists falla (no actualiza BD)', async () => {
@@ -480,7 +539,9 @@ describe('plano-uploader service', () => {
       const mockEqSelect = vi.fn().mockReturnValue({ single: mockSingle });
       const mockSelect = vi.fn().mockReturnValue({ eq: mockEqSelect });
       const mockSelectAfter = vi.fn().mockResolvedValue({ data: [{ id: 'job-1' }], error: null });
-      const mockEqUpdate = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockIsPlansUrl = vi.fn().mockReturnValue({ select: mockSelectAfter });
+      const mockEqUpdate = vi.fn().mockReturnValue({ eq: mockEqPlansUrl, is: mockIsPlansUrl });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEqUpdate });
       mockFrom.mockImplementation((table) => {
         if (table === 'jobs') return { select: mockSelect, update: mockUpdate };

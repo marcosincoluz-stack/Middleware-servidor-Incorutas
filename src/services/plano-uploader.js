@@ -284,19 +284,30 @@ async function uploadPlanoToStorage(jobId, pdfName, fabricacionPath) {
 
 /**
  * Reemplaza plans_url en la tabla jobs con el array serializado completo (append).
- * No usa WHERE plans_url IS NULL (es append, no seteo inicial).
+ * Usa compare-and-swap (CAS): el UPDATE solo afecta la fila si plans_url sigue
+ * siendo igual al valor leído al inicio (expectedOldValue). Si otro proceso appendó
+ * entretanto, 0 filas afectadas → el caller trata la raza (el polling re-detecta y
+ * reintenta en el siguiente ciclo; los objetos ya subidos son idempotentes por upsert).
  *
  * @param {string} jobId ID del trabajo
  * @param {Array<{name: string, path: string}>} plansArray Array completo (viejos + nuevos)
- * @returns {Promise<boolean>} true si se actualizó
+ * @param {string|null} expectedOldValue Valor de plans_url leído al inicio (para CAS)
+ * @returns {Promise<boolean>} true si se actualizó, false si CAS falló (raza)
  */
-async function updatePlansUrl(jobId, plansArray) {
+async function updatePlansUrl(jobId, plansArray, expectedOldValue) {
+  let query = supabase
+    .from('jobs')
+    .update({ plans_url: JSON.stringify(plansArray) })
+    .eq('id', jobId);
+
+  if (expectedOldValue === null || expectedOldValue === undefined) {
+    query = query.is('plans_url', null);
+  } else {
+    query = query.eq('plans_url', expectedOldValue);
+  }
+
   const { data, error } = await withTimeout(
-    supabase
-      .from('jobs')
-      .update({ plans_url: JSON.stringify(plansArray) })
-      .eq('id', jobId)
-      .select('id'),
+    query.select('id'),
     SUPABASE_QUERY_TIMEOUT_MS
   );
 
@@ -391,11 +402,11 @@ async function processJobPlano(jobId, jobTitle) {
     }
 
     const mergedArray = [...existingPlans, ...uploadedEntries];
-    const updated = await updatePlansUrl(jobId, mergedArray);
+    const updated = await updatePlansUrl(jobId, mergedArray, job.plans_url);
 
     if (!updated) {
-      logger.warn(`[PlanoUploader] Job ${jobId}: el UPDATE no afectó filas (¿job borrado?). Objetos quedaron en Storage (idempotente por upsert).`);
-      return { skipped: true, reason: 'update_no_op' };
+      logger.warn(`[PlanoUploader] Job ${jobId}: CAS falló (plans_url fue modificado por otro proceso entre la lectura y el UPDATE). Objetos subidos quedaron en Storage (idempotentes por upsert); el polling re-detectará y reintenta en el siguiente ciclo.`);
+      return { skipped: true, reason: 'race_condition_resolved' };
     }
 
     metricsTracker.addPlanos(uploadedEntries.length);
@@ -479,6 +490,7 @@ module.exports = {
   listTopLevelPdfs,
   selectPlanoPdfs,
   parsePlansUrl,
+  normalizeAscii,
   validatePdfBuffer,
   uploadPlanoToStorage,
   updatePlansUrl,

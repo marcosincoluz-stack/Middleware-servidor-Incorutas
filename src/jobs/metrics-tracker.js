@@ -11,6 +11,7 @@ class MetricsTracker {
     this.totalErrors = 0;
     this.totalPhotos = 0;
     this.totalRejectedByExtension = 0;
+    this.planoStalledCycles = 0;
     this.lastJobProcessed = null;
     this.lastProcessedAt = null;
     this.currentJob = null;
@@ -149,6 +150,7 @@ class MetricsTracker {
       sessionPhotos: store.session.photos,
       sessionPlanos: store.session.planos,
       sessionRejectedByExtension: store.session.rejectedByExtension,
+      planoStalledCycles: this.planoStalledCycles,
       lastJobProcessed: this.lastJobProcessed,
       lastProcessedAt: this.lastProcessedAt,
       currentJob: this.currentJob,
