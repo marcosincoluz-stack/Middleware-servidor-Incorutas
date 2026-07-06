@@ -149,7 +149,7 @@ const config = {
   PLANO_INDEX_TTL_MS: parseInt(process.env.PLANO_INDEX_TTL_MS, 10) || 300000,
 
   // Lista blanca de extensiones de imagen permitidas para descarga
-  ALLOWED_IMAGE_EXTENSIONS: (process.env.ALLOWED_IMAGE_EXTENSIONS || 'jpg,jpeg,png,webp,heic,heif,gif,bmp,tiff,tif')
+  ALLOWED_IMAGE_EXTENSIONS: (process.env.ALLOWED_IMAGE_EXTENSIONS || 'jpg,jpeg,png,webp,heic,heif,gif,bmp,tiff,tif,pdf')
     .split(',')
     .map(ext => `.${ext.trim().toLowerCase()}`)
     .filter(ext => ext.length > 1),

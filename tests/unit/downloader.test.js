@@ -298,7 +298,7 @@ describe('downloader service', () => {
       const mockSelectJob = vi.fn().mockReturnValue({ eq: mockEqJob });
 
       const evData = [
-        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.pdf', type: 'photo' },
+        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.exe', type: 'photo' },
       ];
       const mockLimit = vi.fn().mockResolvedValue({ data: evData, error: null });
       const mockIs = vi.fn().mockReturnValue({ limit: mockLimit });
@@ -517,7 +517,7 @@ describe('downloader service', () => {
       const mockSelectJob = vi.fn().mockReturnValue({ eq: mockEqJob });
 
       const failedEvs = [
-        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.pdf', type: 'photo' },
+        { id: 'ev-1', url: 'https://example.supabase.co/storage/v1/object/sign/evidence/123/document.exe', type: 'photo' },
       ];
       const mockLimit = vi.fn().mockResolvedValue({ data: failedEvs, error: null });
       const mockIsNull = vi.fn().mockReturnValue({ limit: mockLimit });

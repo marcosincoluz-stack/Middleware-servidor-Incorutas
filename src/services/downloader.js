@@ -4,7 +4,7 @@ const config = require('../config');
 const { supabase } = require('./supabase');
 const { logger } = require('../utils/logger');
 const { sanitizeFilename, ensurePathWithinBase } = require('../utils/sanitize');
-const { isAllowedImageExtension } = require('../utils/image-validator');
+const { isAllowedEvidenceExtension, validateFileContent } = require('../utils/image-validator');
 const { checkDiskSpace } = require('../utils/disk');
 const { createLockProvider } = require('../utils/lock');
 const { metricsTracker } = require('../jobs/metrics-tracker');
@@ -259,6 +259,9 @@ async function downloadFileWithRetry(storagePath, destFilePath) {
       if (!data) throw new Error('Supabase Storage devolvió un buffer vacío.');
 
       const buffer = Buffer.from(await data.arrayBuffer());
+
+      validateFileContent(buffer, destFilePath);
+
       await fs.promises.writeFile(partPath, buffer);
 
       const stat = await fs.promises.stat(partPath);
@@ -454,8 +457,8 @@ async function _processJobApprovedInternal(jobId, jobTitle) {
     const originalFilename = path.basename(storagePath);
     const safeFilename = sanitizeFilename(originalFilename);
 
-    if (!isAllowedImageExtension(safeFilename)) {
-      logger.warn(`[Downloader] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
+    if (!isAllowedEvidenceExtension(safeFilename)) {
+      logger.warn(`[Downloader] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes y PDFs.`);
       errorCount++;
       rejectedCount++;
       continue;
@@ -580,8 +583,8 @@ async function retryFailedEvidences(jobId) {
     const originalFilename = path.basename(storagePath);
     const safeFilename = sanitizeFilename(originalFilename);
 
-    if (!isAllowedImageExtension(safeFilename)) {
-      logger.warn(`[RetryFailed] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes.`);
+    if (!isAllowedEvidenceExtension(safeFilename)) {
+      logger.warn(`[RetryFailed] Evidencia ${ev.id} rechazada: extensión no permitida ("${safeFilename}"). Solo se aceptan imágenes y PDFs.`);
       stillFailed++;
       rejectedCount++;
       continue;
