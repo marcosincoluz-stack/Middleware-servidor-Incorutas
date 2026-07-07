@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
@@ -9,6 +10,20 @@ const { getRedisConnection } = require('../utils/redis-connection');
 const { findProjectFolderRecursive, shouldScanDirectory } = require('./downloader');
 const { metricsTracker } = require('../jobs/metrics-tracker');
 const notify = require('../utils/notify');
+
+/**
+ * @typedef {Object} PlanoEntry
+ * @property {string|null} name - Nombre original del PDF (null en legacy)
+ * @property {string} path - Ruta en el bucket de Storage o string legacy
+ */
+
+/**
+ * @typedef {Object} ProcessPlanoResult
+ * @property {boolean} [skipped] - Si true, no se subió nada
+ * @property {string} [reason] - Motivo: 'lock_contention'|'job_not_found'|'job_deleted'|'max_reached'|'no_folder'|'no_pdf'|'up_to_date'
+ * @property {number} [uploaded] - Número de planos subidos
+ * @property {string[]} [paths] - Paths de los planos subidos en Storage
+ */
 
 const lockProvider = (function createProvider() {
   if (config.LOCK_PROVIDER === 'redis') {

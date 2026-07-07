@@ -1,3 +1,4 @@
+// @ts-check
 const { Queue, Worker } = require('bullmq');
 const config = require('../config');
 const { logger } = require('../utils/logger');
@@ -8,6 +9,10 @@ const { metricsTracker } = require('./metrics-tracker');
 const { getFailedJobs, retryFailedJob, clearFailedJobs } = require('./dlq-handler');
 const { connection } = require('../utils/redis-connection');
 const { CircuitBreaker } = require('../utils/circuit-breaker');
+
+/**
+ * @typedef {'job.approved'|'job.paid'|'job.plano'} JobEvent
+ */
 
 const JOB_NAME = 'sync-task';
 

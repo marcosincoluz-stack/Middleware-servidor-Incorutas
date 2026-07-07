@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
@@ -6,6 +7,13 @@ const { supabase } = require('../services/supabase');
 const { jobQueue } = require('./bull-queue');
 const notify = require('../utils/notify');
 const { getProjectFolderIndex, invalidateProjectFolderIndex, listMatchingPdfs, parsePlansUrl } = require('../services/plano-uploader');
+
+/**
+ * @typedef {Object} PollResult
+ * @property {number} found - Jobs encontrados en Supabase
+ * @property {number} enqueued - Jobs encolados en BullMQ
+ * @property {number} skipped - Jobs omitidos (duplicados en cola)
+ */
 
 const SUPABASE_QUERY_TIMEOUT_MS = 10000;
 

@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
@@ -9,6 +10,29 @@ const { checkDiskSpace } = require('../utils/disk');
 const { createLockProvider } = require('../utils/lock');
 const { metricsTracker } = require('../jobs/metrics-tracker');
 const { getRedisConnection } = require('../utils/redis-connection');
+
+/**
+ * @typedef {Object} EvidenceRecord
+ * @property {string} id - UUID de la evidencia en Supabase
+ * @property {string} url - URL o path del archivo en el bucket de Storage
+ * @property {'photo'|'signature'} type - Tipo de evidencia
+ */
+
+/**
+ * @typedef {Object} DownloadResult
+ * @property {number} [downloaded] - Fotos descargadas con éxito
+ * @property {number} [skipped] - Fotos omitidas (ya existían)
+ * @property {number} [errors] - Fotos con error (dentro de tolerancia)
+ * @property {boolean} [skipped] - Si true, el job fue omitido
+ * @property {string} [reason] - Motivo del skip ('already_downloaded'|'lock_contention'|'job_not_found'|'job_deleted'|'max_reached'|'no_folder'|'no_pdf'|'up_to_date')
+ */
+
+/**
+ * @typedef {Object} RetryResult
+ * @property {number} retried - Total de evidencias reintentadas
+ * @property {number} succeeded - Reintentos exitosos
+ * @property {number} stillFailed - Reintentos que siguen fallando
+ */
 
 const lockProvider = (function createProvider() {
   if (config.LOCK_PROVIDER === 'redis') {

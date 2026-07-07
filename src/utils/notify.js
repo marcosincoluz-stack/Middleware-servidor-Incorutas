@@ -1,3 +1,4 @@
+// @ts-check
 const https = require('https');
 const os = require('os');
 const config = require('../config');

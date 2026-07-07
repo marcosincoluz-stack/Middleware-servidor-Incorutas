@@ -1,3 +1,8 @@
+[![CI](https://github.com/marcosincoluz-stack/Middleware-servidor-Incorutas/actions/workflows/ci.yml/badge.svg)](https://github.com/marcosincoluz-stack/Middleware-servidor-Incorutas/actions/workflows/ci.yml)
+![Node.js](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)
+![Vitest](https://img.shields.io/badge/Tests-Vitest-6E9F18?logo=vitest&logoColor=white)
+![License](https://img.shields.io/badge/License-Internal_Use-blue)
+
 # Incorutas Photo Sync
 
 Sincronización de evidencias fotográficas entre Supabase Storage y la infraestructura de almacenamiento local (SMB). Diseñado para operación continua en servidores on-premise sin exposición a internet.
@@ -20,6 +25,8 @@ Middleware (Node.js + Express)
 ```
 
 El middleware consulta Supabase cada 30 segundos en busca de trabajos pendientes. No requiere webhooks, Edge Functions ni puertos abiertos hacia el exterior.
+
+📐 **[Ver especificación de arquitectura completa →](ARCHITECTURE.md)**
 
 ---
 

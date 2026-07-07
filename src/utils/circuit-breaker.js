@@ -1,3 +1,4 @@
+// @ts-check
 const { logger } = require('./logger');
 
 const STATES = {
