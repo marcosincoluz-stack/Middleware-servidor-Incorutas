@@ -361,7 +361,6 @@ let planoStalledCount = 0;
 let lastApprovedAlert = 0;
 let lastPaidAlert = 0;
 let lastPlanoAlert = 0;
-let lastPlanoStalledAlert = 0;
 let isPolling = false;
 
 async function runPollCycle() {
