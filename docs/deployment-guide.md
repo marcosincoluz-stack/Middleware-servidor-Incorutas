@@ -241,6 +241,48 @@ Debe mostrar una línea con `cifs` y `nofail`. Si no, el SMB no se auto-monta y 
 
 ---
 
+## Configuración recomendada del Montaje SMB (fstab)
+
+Para evitar que cortes temporales de red o desconexiones físicas del cable de red dejen congelado ("stuck mount") al servidor Ubuntu Server (y por tanto cuelguen el middleware de Node.js), es obligatorio configurar el montaje CIFS en modo **`soft`** con timeouts agresivos en lugar del modo `hard` predeterminado de Linux.
+
+### Línea recomendada en `/etc/fstab`
+
+Edita el archivo `/etc/fstab` (`sudo nano /etc/fstab`) y añade o modifica la línea de montaje con el siguiente formato:
+
+```text
+//192.168.0.7/incoluz  /mnt/trabajos  cifs  credentials=/etc/cifs-credentials,soft,timeo=50,retrans=2,noserverino,iocharset=utf8,nofail  0  0
+```
+
+### Explicación de opciones de robustez:
+
+| Opción | Qué hace / Por qué es vital |
+|---|---|
+| `soft` | Si hay un corte de red, el sistema operativo de Ubuntu abortará las peticiones I/O tras el timeout devolviendo un error limpio, en lugar de bloquear el proceso indefinidamente. Esto permite que el middleware siga respondiendo y que la cola BullMQ reintente el trabajo más tarde. |
+| `timeo=50` | Define el timeout en 5 segundos (50 décimas de segundo). |
+| `retrans=2` | Limita a 2 los reintentos antes de descartar la conexión. En total, si el servidor físico se desconecta, el fallo se reportará al middleware en unos ~10 segundos de reloj. |
+| `noserverino` | Evita que aparezcan warnings en el `dmesg` del servidor si el host remoto (Windows/AD) no soporta de forma nativa los números de inode Unix. |
+| `nofail` | Si la máquina de Windows está apagada cuando se reinicia el servidor Ubuntu, Ubuntu continuará arrancando con normalidad en lugar de bloquearse en la pantalla de arranque esperando el disco de red. |
+
+### Cómo recuperar un montaje congelado tras un corte de red
+
+Si por algún motivo el cable de red fue desconectado momentáneamente y el montaje se quedó congelado en estado *stuck*, sigue estos pasos para restablecerlo:
+
+1. **Desmontar forzadamente el recurso colgado**:
+   ```bash
+   sudo umount -f -l /mnt/trabajos
+   ```
+   *(Los flags `-f` y `-l` son para forzar y desmontar de forma "lazy" liberando los procesos de Node).*
+2. **Volver a montar**:
+   ```bash
+   sudo mount -a
+   ```
+3. **Reiniciar el middleware**:
+   ```bash
+   pm2 restart incorutas-photo-sync
+   ```
+
+---
+
 ## Acceso al dashboard
 
 El dashboard no está expuesto al exterior. Acceder vía SSH tunnel:

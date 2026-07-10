@@ -301,11 +301,17 @@ describe('polling module', () => {
         BACKFILL_MAX_JOBS: 100,
         BACKFILL_MAX_PENDING: 200,
         POLLING_INTERVAL_MS: 30000,
+        SLOW_POLLING_INTERVAL_MS: 300000,
         POLLING_ENABLED: true,
         ENABLE_FOLDER_MOVE: false,
         TRABAJOS_BASE_PATH: tmpDir,
         POLLING_FAILURE_ALERT_THRESHOLD: 99,
         POLLING_ALERT_COOLDOWN_MS: 999999,
+        ENABLE_PLANO_UPLOAD: false,
+        PLANO_UPLOAD_STATUSES: [],
+        PLANO_SCAN_SUBFOLDER: 'FABRICACION',
+        PLANO_INDEX_TTL_MS: 300000,
+        PLANO_MAX_PLANOS_PER_JOB: 4,
       });
 
       let resolveDelay;
@@ -635,7 +641,7 @@ describe('polling module', () => {
       expect(result.skipped).toBe(1);
     });
 
-    it('debería lanzar el error de Supabase (lo captura runPollCycle)', async () => {
+    it('debería lanzar el error de Supabase (lo captura runSlowCycle)', async () => {
       mockGetPendingCount.mockResolvedValue(0);
       mockJobsQueryError('Supabase error');
 

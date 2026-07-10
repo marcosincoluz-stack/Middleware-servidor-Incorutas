@@ -361,7 +361,8 @@ async function pollPlanosJobs() {
   return { found: jobs.length, enqueued, skipped };
 }
 
-let pollInterval = null;
+let fastInterval = null;
+let slowInterval = null;
 let approvedFailCount = 0;
 let paidFailCount = 0;
 let planoFailCount = 0;
@@ -369,9 +370,10 @@ let planoStalledCount = 0;
 let lastApprovedAlert = 0;
 let lastPaidAlert = 0;
 let lastPlanoAlert = 0;
-let isPolling = false;
+let isFastPolling = false;
+let isSlowPolling = false;
 
-async function runPollCycle() {
+async function runFastCycle() {
   try {
     await pollApprovedJobs();
     approvedFailCount = 0;
@@ -380,7 +382,9 @@ async function runPollCycle() {
     approvedFailCount++;
     await maybeAlertPollingFailure(approvedFailCount, err.message, 'approved', lastApprovedAlert, (ts) => { lastApprovedAlert = ts; });
   }
+}
 
+async function runSlowCycle() {
   try {
     await pollPaidJobs();
     paidFailCount = 0;
@@ -430,41 +434,59 @@ async function maybeAlertPollingFailure(failCount, lastError, cycleType, lastAle
 }
 
 /**
- * Inicia el polling periódico de jobs.
- * Ejecuta un ciclo inmediato y luego repite cada POLLING_INTERVAL_MS.
+ * Inicia el polling híbrido de jobs.
+ * Timer rápido (POLLING_INTERVAL_MS): detecta jobs approved para descarga de imágenes.
+ * Timer lento (SLOW_POLLING_INTERVAL_MS): paid (move), stale (auto-heal), planos.
+ * Ejecuta ambos ciclos inmediatamente al arrancar y luego repite cada uno en su intervalo.
  */
 function startPolling() {
-  logger.info(`[Polling] Iniciado. Intervalo: ${config.POLLING_INTERVAL_MS}ms`);
+  logger.info(`[Polling] Iniciado. Rápido: ${config.POLLING_INTERVAL_MS}ms | Lento: ${config.SLOW_POLLING_INTERVAL_MS}ms`);
 
-  const runGuarded = () => {
-    if (isPolling) {
-      logger.debug('[Polling] Ciclo anterior aún en curso. Skip.');
+  const runGuardedFast = () => {
+    if (isFastPolling) {
+      logger.debug('[Polling] Ciclo rápido anterior aún en curso. Skip.');
       return;
     }
-    isPolling = true;
-    runPollCycle().finally(() => { isPolling = false; });
+    isFastPolling = true;
+    runFastCycle().finally(() => { isFastPolling = false; });
   };
 
-  runGuarded();
+  const runGuardedSlow = () => {
+    if (isSlowPolling) {
+      logger.debug('[Polling] Ciclo lento anterior aún en curso. Skip.');
+      return;
+    }
+    isSlowPolling = true;
+    runSlowCycle().finally(() => { isSlowPolling = false; });
+  };
 
-  pollInterval = setInterval(() => {
-    runGuarded();
-  }, config.POLLING_INTERVAL_MS);
+  runGuardedFast();
+  runGuardedSlow();
 
-  if (pollInterval && typeof pollInterval.unref === 'function') {
-    pollInterval.unref();
+  fastInterval = setInterval(runGuardedFast, config.POLLING_INTERVAL_MS);
+  slowInterval = setInterval(runGuardedSlow, config.SLOW_POLLING_INTERVAL_MS);
+
+  if (fastInterval && typeof fastInterval.unref === 'function') {
+    fastInterval.unref();
+  }
+  if (slowInterval && typeof slowInterval.unref === 'function') {
+    slowInterval.unref();
   }
 }
 
 /**
- * Detiene el polling periódico.
+ * Detiene ambos timers de polling.
  */
 function stopPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
-    logger.info('[Polling] Detenido.');
+  if (fastInterval) {
+    clearInterval(fastInterval);
+    fastInterval = null;
   }
+  if (slowInterval) {
+    clearInterval(slowInterval);
+    slowInterval = null;
+  }
+  logger.info('[Polling] Detenido.');
 }
 
-module.exports = { startPolling, stopPolling, pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs, runPollCycle };
+module.exports = { startPolling, stopPolling, pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs, runFastCycle, runSlowCycle };

@@ -22,7 +22,7 @@ src/
     supabase.js          — Singleton Supabase client (service_role key)
   jobs/
     bull-queue.js        — BullMQ queue/worker orchestrator (circuit breaker, stalled job detection). Events: job.approved | job.paid | job.plano
-    polling.js           — Automatic polling every 30s (approved jobs + paid jobs for TERMINADOS)
+    polling.js           — Polling híbrido 2 timers: approved cada 30s (latencia imágenes), paid+stale+planos cada 5min (reduce egress 70%)
     error-classifier.js  — Pure error classification (replaces inline string-matching)
     metrics-tracker.js   — Job metrics (onCompleted, onFailed, addPhotos, addPlanos, getStatus)
     dlq-handler.js        — Dead letter queue operations (getFailedJobs, retryFailedJob, clearFailedJobs)
@@ -82,7 +82,7 @@ npm run backfill:dry     # Dry-run retroactive download
 - **`mkdir({ recursive: true })`** without prior `existsSync` — idempotent by design.
 - **BullMQ** processes jobs sequentially (`concurrency: 1`, `limiter: 1/1000ms`). Stalled job detection (30s interval, 60s lock duration).
 - **Lock provider** pattern for folder creation + folder move concurrency control (`MemoryLockProvider` default, `RedisLockProvider` via SET NX+PX for multi-instance). `release()` is async.
-- **Polling** replaces webhooks: every 30s, `polling.js` queries Supabase for jobs pending download and jobs paid pending move to TERMINADOS. No ports open to internet, no Edge Function needed.
+- **Polling híbrido 2 timers**: el timer rápido (`POLLING_INTERVAL_MS`, 30s) ejecuta `pollApprovedJobs` para máxima latencia de imágenes. El timer lento (`SLOW_POLLING_INTERVAL_MS`, 5min) ejecuta `pollPaidJobs` + `pollStaleJobs` + `pollPlanosJobs` (no críticos). Reduce egress 70% sin afectar latencia de descarga. No ports open to internet, no Edge Function needed.
 - **`/logs` endpoint** uses stream-based tail reading (`tailFile()`) capped at `LOG_TAIL_MAX_BYTES` (64KB default). Partial first line is skipped.
 - **Error classification** prioritizes `err.code` (Node.js native: ENOSPC, ENOENT, EIO, ECONNRESET, etc.) over `err.message` substring matching.
 - **Partial download tolerance** via `DOWNLOAD_TOLERANCE_PERCENT` (default 0 = strict). If errors <= tolerance, job is marked `downloaded` with warnings.
@@ -118,7 +118,7 @@ npm run backfill:dry     # Dry-run retroactive download
 | `requestId` + `AsyncLocalStorage` | Every request gets `X-Request-Id` header + log correlation |
 | `requestLogger` middleware | HTTP request tracing with method/path/status/duration |
 | `cross-env` for dev script | Windows-compatible `NODE_ENV=development` |
-| Polling replaces webhooks | No ports open to internet, no Edge Function, no HMAC. 30s delay is acceptable for photo sync. |
+| Polling híbrido 2 timers | Timer rápido (30s) para approved (latencia imágenes), timer lento (5min) para paid+stale+planos. Reduce egress 70% sin afectar descarga. |
 | Webhook dedup via Redis SETNX | ~~Deprecated~~ Removed with webhook subsystem |
 | Tail-based `/logs` | Stream reader capped at 64KB; partial line skip; no OOM |
 | Error classifier `err.code` priority | Robust multi-locale error detection (ENOSPC, ENOENT, EIO, ECONNRESET) |
@@ -180,7 +180,8 @@ Magic constants are centralized in `config.js`. Key exports beyond env vars:
 - `LOG_TAIL_MAX_BYTES` — Max bytes read from log file (default 64KB)
 - `DOWNLOAD_TOLERANCE_PERCENT` — Allowed % of photo download failures (default 0 = strict)
 - `SUPABASE_BUCKET` — Supabase Storage bucket name (default: `evidence`)
-- `POLLING_INTERVAL_MS` — Polling interval (default 30000)
+- `POLLING_INTERVAL_MS` — Polling interval rápido: approved jobs (default 30000)
+- `SLOW_POLLING_INTERVAL_MS` — Polling interval lento: paid+stale+planos (default 300000)
 - `POLLING_ENABLED` — Enable/disable polling (default true)
 - `POLLING_FAILURE_ALERT_THRESHOLD` — Consecutive failures before Telegram alert (default 3)
 - `POLLING_ALERT_COOLDOWN_MS` — Alert cooldown to prevent spam (default 300000)
@@ -238,7 +239,7 @@ Magic constants are centralized in `config.js`. Key exports beyond env vars:
 - Circuit breaker opens after 5 consecutive Supabase failures — jobs fail fast instead of hanging
 - Stalled jobs detected after 30s — automatically reprocessed by BullMQ
 - Graceful shutdown: 2s drain → `closeAllConnections()` → `stopPolling()` → 30s queue drain → Redis close → metrics persist → 35s force exit
-- Polling runs every 30s (`POLLING_INTERVAL_MS`) — queries Supabase for pending jobs. No ports open to internet needed.
+- Polling híbrido: timer rápido cada 30s (`POLLING_INTERVAL_MS`) ejecuta `pollApprovedJobs` (latencia imágenes). Timer lento cada 5min (`SLOW_POLLING_INTERVAL_MS`) ejecuta `pollPaidJobs` + `pollStaleJobs` + `pollPlanosJobs`. Reduce egress 70%. No ports open to internet needed.
 - `POLLING_ENABLED=false` disables polling (useful for manual-only mode via `/backfill`)
 - Polling alerts via Telegram after 3 consecutive failures (`POLLING_FAILURE_ALERT_THRESHOLD`), with 5min cooldown (`POLLING_ALERT_COOLDOWN_MS`)
 - `/health` (public) pings Redis + Supabase + SMB with `HEALTH_PING_TIMEOUT_MS` timeout per dependency
