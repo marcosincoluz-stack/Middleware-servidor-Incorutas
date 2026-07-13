@@ -84,7 +84,14 @@ Todas las variables se definen en `.env`. Ver `.env.example` para la lista compl
 
 | Variable | Default | Descripción |
 |---|---|---|
-| `POLLING_INTERVAL_MS` | `30000` | Intervalo de polling a Supabase |
+| `POLLING_INTERVAL_MS` | `30000` | Intervalo de polling rápido a Supabase |
+| `SLOW_POLLING_INTERVAL_MS` | `300000` | Intervalo de polling lento a Supabase |
+| `ADAPTIVE_POLLING_ENABLED` | `true` | Activar/desactivar polling adaptativo fuera de horario laboral |
+| `ADAPTIVE_IDLE_THRESHOLD` | `3` | Ciclos vacíos antes de comenzar backoff |
+| `ADAPTIVE_MAX_INTERVAL_MS` | `1800000` | Intervalo máximo del backoff fuera de horario laboral (30 min) |
+| `BUSINESS_HOURS_START` | `7` | Hora local de inicio de jornada laboral |
+| `BUSINESS_HOURS_END` | `21` | Hora local de fin de jornada laboral |
+| `BUSINESS_DAYS` | `1,2,3,4,5` | Días laborables (Lunes a Viernes) |
 | `POLLING_ENABLED` | `true` | Activar/desactivar polling |
 | `ENABLE_FOLDER_MOVE` | `false` | Mover carpetas a TERMINADOS al pagar |
 | `REDIS_PASSWORD` | — | Contraseña de Redis (recomendado en producción) |

@@ -9,6 +9,40 @@ const notify = require('../utils/notify');
 const { getProjectFolderIndex, invalidateProjectFolderIndex, listMatchingPdfs, parsePlansUrl } = require('../services/plano-uploader');
 
 /**
+ * Determina si la hora actual cae dentro del horario laboral configurado.
+ * @param {Date} [now] - Fecha/hora a evaluar (inyectable para tests)
+ * @returns {boolean}
+ */
+function isBusinessHours(now = new Date()) {
+  const day = now.getDay();       // 0=Dom, 1=Lun, ..., 6=Sáb
+  const hour = now.getHours();    // 0-23 (hora local del servidor)
+
+  if (!config.BUSINESS_DAYS.includes(day)) return false;
+  return hour >= config.BUSINESS_HOURS_START && hour < config.BUSINESS_HOURS_END;
+}
+
+/**
+ * Calcula el intervalo del próximo ciclo rápido de polling.
+ *
+ * - Si el adaptativo está desactivado → devuelve el intervalo base.
+ * - Si estamos en horario laboral → devuelve el intervalo base (siempre rápido).
+ * - Fuera de horario, tras N ciclos vacíos → backoff exponencial con techo.
+ *
+ * @param {number} idleStreak - Ciclos consecutivos sin encontrar trabajo
+ * @param {Date} [now] - Fecha/hora actual (inyectable para tests)
+ * @returns {number} Intervalo en milisegundos
+ */
+function computeAdaptiveInterval(idleStreak, now = new Date()) {
+  if (!config.ADAPTIVE_POLLING_ENABLED) return config.POLLING_INTERVAL_MS;
+  if (isBusinessHours(now)) return config.POLLING_INTERVAL_MS;
+  if (idleStreak < config.ADAPTIVE_IDLE_THRESHOLD) return config.POLLING_INTERVAL_MS;
+
+  const exponent = idleStreak - config.ADAPTIVE_IDLE_THRESHOLD;
+  const computed = config.POLLING_INTERVAL_MS * Math.pow(2, exponent);
+  return Math.min(computed, config.ADAPTIVE_MAX_INTERVAL_MS);
+}
+
+/**
  * @typedef {Object} PollResult
  * @property {number} found - Jobs encontrados en Supabase
  * @property {number} enqueued - Jobs encolados en BullMQ
@@ -363,6 +397,8 @@ async function pollPlanosJobs() {
 
 let fastInterval = null;
 let slowInterval = null;
+let fastIdleStreak = 0;
+let currentFastInterval = 0;
 let approvedFailCount = 0;
 let paidFailCount = 0;
 let planoFailCount = 0;
@@ -375,8 +411,15 @@ let isSlowPolling = false;
 
 async function runFastCycle() {
   try {
-    await pollApprovedJobs();
+    const result = await pollApprovedJobs();
     approvedFailCount = 0;
+
+    // Tracking adaptativo
+    if (result.found > 0) {
+      fastIdleStreak = 0;
+    } else {
+      fastIdleStreak++;
+    }
   } catch (err) {
     logger.error(`[Polling] Error en ciclo approved: ${err.message}`);
     approvedFailCount++;
@@ -440,15 +483,40 @@ async function maybeAlertPollingFailure(failCount, lastError, cycleType, lastAle
  * Ejecuta ambos ciclos inmediatamente al arrancar y luego repite cada uno en su intervalo.
  */
 function startPolling() {
-  logger.info(`[Polling] Iniciado. Rápido: ${config.POLLING_INTERVAL_MS}ms | Lento: ${config.SLOW_POLLING_INTERVAL_MS}ms`);
+  const adaptiveLabel = config.ADAPTIVE_POLLING_ENABLED
+    ? `Adaptativo: ON (threshold=${config.ADAPTIVE_IDLE_THRESHOLD}, techo=${config.ADAPTIVE_MAX_INTERVAL_MS}ms, horario=${config.BUSINESS_HOURS_START}:00-${config.BUSINESS_HOURS_END}:00)`
+    : 'Adaptativo: OFF';
+  logger.info(`[Polling] Iniciado. Rápido: ${config.POLLING_INTERVAL_MS}ms | Lento: ${config.SLOW_POLLING_INTERVAL_MS}ms | ${adaptiveLabel}`);
 
   const runGuardedFast = () => {
     if (isFastPolling) {
       logger.debug('[Polling] Ciclo rápido anterior aún en curso. Skip.');
+      scheduleFastCycle();
       return;
     }
     isFastPolling = true;
-    runFastCycle().finally(() => { isFastPolling = false; });
+    runFastCycle()
+      .finally(() => {
+        isFastPolling = false;
+        scheduleFastCycle();
+      });
+  };
+
+  const scheduleFastCycle = () => {
+    const interval = computeAdaptiveInterval(fastIdleStreak);
+
+    if (interval !== currentFastInterval) {
+      if (currentFastInterval > 0) {
+        logger.info(`[Polling] Intervalo adaptado: ${currentFastInterval}ms → ${interval}ms (idle streak: ${fastIdleStreak})`);
+      }
+      currentFastInterval = interval;
+    }
+
+    fastInterval = setTimeout(runGuardedFast, interval);
+
+    if (fastInterval && typeof fastInterval.unref === 'function') {
+      fastInterval.unref();
+    }
   };
 
   const runGuardedSlow = () => {
@@ -460,15 +528,13 @@ function startPolling() {
     runSlowCycle().finally(() => { isSlowPolling = false; });
   };
 
+  // Ejecución inicial de ambos ciclos
+  currentFastInterval = config.POLLING_INTERVAL_MS;
   runGuardedFast();
   runGuardedSlow();
 
-  fastInterval = setInterval(runGuardedFast, config.POLLING_INTERVAL_MS);
   slowInterval = setInterval(runGuardedSlow, config.SLOW_POLLING_INTERVAL_MS);
 
-  if (fastInterval && typeof fastInterval.unref === 'function') {
-    fastInterval.unref();
-  }
   if (slowInterval && typeof slowInterval.unref === 'function') {
     slowInterval.unref();
   }
@@ -479,14 +545,33 @@ function startPolling() {
  */
 function stopPolling() {
   if (fastInterval) {
-    clearInterval(fastInterval);
+    clearTimeout(fastInterval);
     fastInterval = null;
   }
   if (slowInterval) {
     clearInterval(slowInterval);
     slowInterval = null;
   }
+  fastIdleStreak = 0;
+  currentFastInterval = 0;
   logger.info('[Polling] Detenido.');
 }
 
-module.exports = { startPolling, stopPolling, pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs, runFastCycle, runSlowCycle };
+function getCurrentFastInterval() {
+  return currentFastInterval;
+}
+
+module.exports = {
+  startPolling,
+  stopPolling,
+  pollApprovedJobs,
+  pollPaidJobs,
+  pollStaleJobs,
+  pollPlanosJobs,
+  runFastCycle,
+  runSlowCycle,
+  // Funciones expuestas para tests y métricas
+  isBusinessHours,
+  computeAdaptiveInterval,
+  getCurrentFastInterval,
+};

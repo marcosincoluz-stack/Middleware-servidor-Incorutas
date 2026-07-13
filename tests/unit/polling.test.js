@@ -59,6 +59,12 @@ injectMock('../../src/config', {
   POLLING_ENABLED: true,
   ENABLE_FOLDER_MOVE: true,
   TRABAJOS_BASE_PATH: tmpDir,
+  ADAPTIVE_POLLING_ENABLED: true,
+  ADAPTIVE_IDLE_THRESHOLD: 3,
+  ADAPTIVE_MAX_INTERVAL_MS: 1800000,
+  BUSINESS_HOURS_START: 7,
+  BUSINESS_HOURS_END: 21,
+  BUSINESS_DAYS: [1, 2, 3, 4, 5],
 });
 
 const clearCache = (pattern) => {
@@ -70,7 +76,15 @@ const clearCache = (pattern) => {
 };
 clearCache('polling');
 
-const { pollApprovedJobs, pollPaidJobs, pollStaleJobs, pollPlanosJobs } = require('../../src/jobs/polling');
+const {
+  pollApprovedJobs,
+  pollPaidJobs,
+  pollStaleJobs,
+  pollPlanosJobs,
+  isBusinessHours,
+  computeAdaptiveInterval,
+  getCurrentFastInterval,
+} = require('../../src/jobs/polling');
 
 const config = require('../../src/config');
 
@@ -646,6 +660,82 @@ describe('polling module', () => {
       mockJobsQueryError('Supabase error');
 
       await expect(pollPlanosJobs()).rejects.toThrow(/Supabase error/);
+    });
+  });
+
+  describe('adaptive polling logic', () => {
+    it('isBusinessHours: no debería ser horario laboral el domingo', () => {
+      const sunday = new Date('2026-07-12T12:00:00'); // Domingo
+      expect(isBusinessHours(sunday)).toBe(false);
+    });
+
+    it('isBusinessHours: debería ser horario laboral un martes a las 10:00', () => {
+      const tuesday = new Date('2026-07-14T10:00:00'); // Martes 10:00
+      expect(isBusinessHours(tuesday)).toBe(true);
+    });
+
+    it('isBusinessHours: no debería ser horario laboral un martes a las 6:59', () => {
+      const tuesdayEarly = new Date('2026-07-14T06:59:00');
+      expect(isBusinessHours(tuesdayEarly)).toBe(false);
+    });
+
+    it('isBusinessHours: no debería ser horario laboral un martes a las 21:00', () => {
+      const tuesdayLate = new Date('2026-07-14T21:00:00');
+      expect(isBusinessHours(tuesdayLate)).toBe(false);
+    });
+
+    it('computeAdaptiveInterval: no debería ralentizar en horario laboral', () => {
+      const tuesday = new Date('2026-07-14T10:00:00');
+      expect(computeAdaptiveInterval(10, tuesday)).toBe(30000);
+    });
+
+    it('computeAdaptiveInterval: no debería ralentizar si idleStreak < threshold', () => {
+      const sunday = new Date('2026-07-12T12:00:00');
+      expect(computeAdaptiveInterval(2, sunday)).toBe(30000);
+    });
+
+    it('computeAdaptiveInterval: debería aplicar backoff exponencial fuera de horario laboral', () => {
+      const sunday = new Date('2026-07-12T12:00:00');
+      // Threshold = 3.
+      // idleStreak = 3 (exponent = 0) => 30000 * 2^0 = 30000
+      expect(computeAdaptiveInterval(3, sunday)).toBe(30000);
+      // idleStreak = 4 (exponent = 1) => 30000 * 2^1 = 60000
+      expect(computeAdaptiveInterval(4, sunday)).toBe(60000);
+      // idleStreak = 5 (exponent = 2) => 30000 * 2^2 = 120000
+      expect(computeAdaptiveInterval(5, sunday)).toBe(120000);
+    });
+
+    it('computeAdaptiveInterval: debería respetar el techo de 30 minutos', () => {
+      const sunday = new Date('2026-07-12T12:00:00');
+      expect(computeAdaptiveInterval(50, sunday)).toBe(1800000); // 30 minutos
+    });
+
+    it('computeAdaptiveInterval: siempre devuelve base si está desactivado', () => {
+      config.ADAPTIVE_POLLING_ENABLED = false;
+      const sunday = new Date('2026-07-12T12:00:00');
+      expect(computeAdaptiveInterval(50, sunday)).toBe(30000);
+      config.ADAPTIVE_POLLING_ENABLED = true; // Restaurar
+    });
+
+    it('startPolling integration: debería inicializar currentFastInterval con POLLING_INTERVAL_MS', () => {
+      vi.useFakeTimers();
+
+      mockGetPendingCount.mockResolvedValue(0);
+      const mockLimit = vi.fn().mockResolvedValue({ data: [], error: null });
+      const mockOrder = vi.fn().mockReturnValue({ limit: mockLimit });
+      const mockIs = vi.fn().mockReturnValue({ order: mockOrder });
+      const mockIn = vi.fn().mockReturnValue({ is: mockIs });
+      const mockSelect = vi.fn().mockReturnValue({ in: mockIn });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const { startPolling, stopPolling, getCurrentFastInterval: getInterval } = require('../../src/jobs/polling');
+
+      startPolling();
+
+      expect(getInterval()).toBe(30000);
+
+      stopPolling();
+      vi.useRealTimers();
     });
   });
 });

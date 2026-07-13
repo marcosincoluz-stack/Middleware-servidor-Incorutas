@@ -118,6 +118,15 @@ const config = {
   POLLING_ENABLED: process.env.POLLING_ENABLED !== 'false',
   POLLING_FAILURE_ALERT_THRESHOLD: parseInt(process.env.POLLING_FAILURE_ALERT_THRESHOLD, 10) || 3,
   POLLING_ALERT_COOLDOWN_MS: parseInt(process.env.POLLING_ALERT_COOLDOWN_MS, 10) || 300000,
+  ADAPTIVE_POLLING_ENABLED: process.env.ADAPTIVE_POLLING_ENABLED !== 'false',
+  ADAPTIVE_IDLE_THRESHOLD: parseInt(process.env.ADAPTIVE_IDLE_THRESHOLD, 10) || 3,
+  ADAPTIVE_MAX_INTERVAL_MS: parseInt(process.env.ADAPTIVE_MAX_INTERVAL_MS, 10) || 1800000,
+  BUSINESS_HOURS_START: parseInt(process.env.BUSINESS_HOURS_START, 10) || 7,
+  BUSINESS_HOURS_END: parseInt(process.env.BUSINESS_HOURS_END, 10) || 21,
+  BUSINESS_DAYS: (process.env.BUSINESS_DAYS || '1,2,3,4,5')
+    .split(',')
+    .map(d => parseInt(d.trim(), 10))
+    .filter(d => d >= 0 && d <= 6),
 
   // Lectura de logs (dashboard)
   LOG_TAIL_MAX_BYTES: parseInt(process.env.LOG_TAIL_MAX_BYTES, 10) || 65536,
