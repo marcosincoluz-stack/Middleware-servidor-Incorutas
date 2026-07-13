@@ -112,6 +112,9 @@ const config = {
   // Tolerancia a fallos de descarga
   DOWNLOAD_TOLERANCE_PERCENT: parseInt(process.env.DOWNLOAD_TOLERANCE_PERCENT, 10) || 0,
 
+  // Sanitización de Privacidad
+  STRIP_EXIF_ENABLED: process.env.STRIP_EXIF_ENABLED !== 'false',
+
   // Polling
   POLLING_INTERVAL_MS: parseInt(process.env.POLLING_INTERVAL_MS, 10) || 30000,
   SLOW_POLLING_INTERVAL_MS: parseInt(process.env.SLOW_POLLING_INTERVAL_MS, 10) || 300000,

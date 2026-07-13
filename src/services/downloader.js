@@ -4,6 +4,7 @@ const path = require('path');
 const config = require('../config');
 const { supabase } = require('./supabase');
 const { logger } = require('../utils/logger');
+const sharp = require('sharp');
 const { sanitizeFilename, ensurePathWithinBase } = require('../utils/sanitize');
 const { isAllowedEvidenceExtension, validateFileContent } = require('../utils/image-validator');
 const { checkDiskSpace } = require('../utils/disk');
@@ -286,7 +287,20 @@ async function downloadFileWithRetry(storagePath, destFilePath) {
 
       validateFileContent(buffer, destFilePath);
 
-      await fs.promises.writeFile(partPath, buffer);
+      let finalBuffer = buffer;
+      const ext = path.extname(destFilePath).toLowerCase();
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.tiff'];
+
+      if (config.STRIP_EXIF_ENABLED && imageExtensions.includes(ext)) {
+        try {
+          logger.debug(`[RGPD] Sanitizando metadatos EXIF de la imagen: "${path.basename(destFilePath)}"`);
+          finalBuffer = await sharp(buffer).rotate().toBuffer();
+        } catch (sharpError) {
+          logger.warn(`[RGPD] No se pudo procesar la imagen con sharp para limpiar EXIF: ${sharpError.message}. Guardando buffer original.`);
+        }
+      }
+
+      await fs.promises.writeFile(partPath, finalBuffer);
 
       const stat = await fs.promises.stat(partPath);
       if (stat.size === 0) {

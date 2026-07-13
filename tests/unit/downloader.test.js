@@ -52,6 +52,15 @@ injectMock('../../src/jobs/bull-queue', { jobQueue: mockJobQueue });
 injectMock('../../src/jobs/metrics-tracker', { metricsTracker: mockMetricsTracker });
 injectMock('../../src/utils/redis-connection', { connection: {}, getRedisConnection: vi.fn() });
 
+const mockSharpRotate = vi.fn().mockReturnThis();
+const mockSharpToBuffer = vi.fn().mockResolvedValue(Buffer.from('processed_image_data_mocked_by_sharp'));
+const mockSharp = vi.fn().mockImplementation(() => ({
+  rotate: mockSharpRotate,
+  toBuffer: mockSharpToBuffer
+}));
+
+injectMock('sharp', mockSharp);
+
 const clearDownloaderCache = () => {
   const resolved = require.resolve('../../src/services/downloader');
   const resolvedLower = resolved.toLowerCase();
@@ -62,6 +71,9 @@ const clearDownloaderCache = () => {
   }
 };
 clearDownloaderCache();
+
+// Desactivar sanitización EXIF por defecto para evitar alterar tests existentes
+require('../../src/config').STRIP_EXIF_ENABLED = false;
 
 const { processJobApproved, getStoragePath, downloadFileWithRetry, resolveUniqueFilename } = require('../../src/services/downloader');
 
@@ -361,6 +373,7 @@ describe('downloader service', () => {
 
     it('no debería tratar archivo .part como descarga completa', async () => {
       const tmpDir = path.join(os.tmpdir(), 'test-atomic-partial');
+      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
       await fs.promises.mkdir(tmpDir, { recursive: true });
       const destFile = path.join(tmpDir, 'photo.jpg');
       const partFile = `${destFile}.part`;
@@ -751,6 +764,132 @@ describe('downloader service', () => {
 
       // Limpieza
       await fs.promises.rm(tmpBase, { recursive: true, force: true }).catch(() => {});
+    });
+  });
+
+  describe('downloadFileWithRetry — EXIF sanitization (sharp)', () => {
+    beforeEach(() => {
+      mockSharp.mockClear();
+      mockSharpRotate.mockClear();
+      mockSharpToBuffer.mockClear();
+      mockDownload.mockReset();
+    });
+
+    it('debería sanitizar metadatos EXIF de imagen si STRIP_EXIF_ENABLED=true', async () => {
+      const tmpDir = path.join(os.tmpdir(), 'test-exif-active');
+      await fs.promises.mkdir(tmpDir, { recursive: true });
+      const destFile = path.join(tmpDir, 'photo.jpg');
+
+      mockDownload.mockResolvedValue({
+        data: { arrayBuffer: async () => new ArrayBuffer(50) },
+        error: null
+      });
+
+      // Asegurar que la config tiene STRIP_EXIF_ENABLED=true
+      clearDownloaderCache();
+      const mockConfig = {
+        TRABAJOS_BASE_PATH: tmpDir,
+        MIN_DISK_MB: 500,
+        IS_DEV_MODE: false,
+        DOWNLOAD_MAX_RETRIES: 1,
+        DOWNLOAD_RETRY_DELAY_MS: 1,
+        MAX_FILE_SIZE_MB: 50,
+        MAX_EVIDENCES_PER_JOB: 150,
+        DOWNLOAD_TOLERANCE_PERCENT: 0,
+        LOCK_PROVIDER: 'memory',
+        SUPABASE_BUCKET: 'evidence',
+        DISK_CHECK_INTERVAL: 10,
+        MAX_COLLISIONS: 100,
+        STRIP_EXIF_ENABLED: true,
+      };
+      injectMock('../../src/config', mockConfig);
+      const { downloadFileWithRetry } = require('../../src/services/downloader');
+
+      const result = await downloadFileWithRetry('123/photo.jpg', destFile);
+
+      expect(mockSharp).toHaveBeenCalled();
+      expect(mockSharpRotate).toHaveBeenCalled();
+      expect(mockSharpToBuffer).toHaveBeenCalled();
+      // El tamaño final debe ser el tamaño del buffer retornado por el mock (36 bytes de 'processed_image_data_mocked_by_sharp')
+      expect(result.size).toBe(36);
+
+      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    it('no debería sanitizar si STRIP_EXIF_ENABLED=false', async () => {
+      const tmpDir = path.join(os.tmpdir(), 'test-exif-inactive');
+      await fs.promises.mkdir(tmpDir, { recursive: true });
+      const destFile = path.join(tmpDir, 'photo.jpg');
+
+      mockDownload.mockResolvedValue({
+        data: { arrayBuffer: async () => new ArrayBuffer(50) },
+        error: null
+      });
+
+      clearDownloaderCache();
+      const mockConfig = {
+        TRABAJOS_BASE_PATH: tmpDir,
+        MIN_DISK_MB: 500,
+        IS_DEV_MODE: false,
+        DOWNLOAD_MAX_RETRIES: 1,
+        DOWNLOAD_RETRY_DELAY_MS: 1,
+        MAX_FILE_SIZE_MB: 50,
+        MAX_EVIDENCES_PER_JOB: 150,
+        DOWNLOAD_TOLERANCE_PERCENT: 0,
+        LOCK_PROVIDER: 'memory',
+        SUPABASE_BUCKET: 'evidence',
+        DISK_CHECK_INTERVAL: 10,
+        MAX_COLLISIONS: 100,
+        STRIP_EXIF_ENABLED: false,
+      };
+      injectMock('../../src/config', mockConfig);
+      const { downloadFileWithRetry } = require('../../src/services/downloader');
+
+      const result = await downloadFileWithRetry('123/photo.jpg', destFile);
+
+      expect(mockSharp).not.toHaveBeenCalled();
+      expect(result.size).toBe(50); // Mantiene el tamaño original
+
+      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    });
+
+    it('no debería procesar con sharp si el archivo es un PDF', async () => {
+      const tmpDir = path.join(os.tmpdir(), 'test-exif-pdf');
+      await fs.promises.mkdir(tmpDir, { recursive: true });
+      const destFile = path.join(tmpDir, 'documento.pdf');
+
+      // Los PDFs deben empezar con %PDF-
+      const pdfBuffer = Buffer.from('%PDF-1.4 mock data');
+      mockDownload.mockResolvedValue({
+        data: { arrayBuffer: async () => new Uint8Array(pdfBuffer).buffer },
+        error: null
+      });
+
+      clearDownloaderCache();
+      const mockConfig = {
+        TRABAJOS_BASE_PATH: tmpDir,
+        MIN_DISK_MB: 500,
+        IS_DEV_MODE: false,
+        DOWNLOAD_MAX_RETRIES: 1,
+        DOWNLOAD_RETRY_DELAY_MS: 1,
+        MAX_FILE_SIZE_MB: 50,
+        MAX_EVIDENCES_PER_JOB: 150,
+        DOWNLOAD_TOLERANCE_PERCENT: 0,
+        LOCK_PROVIDER: 'memory',
+        SUPABASE_BUCKET: 'evidence',
+        DISK_CHECK_INTERVAL: 10,
+        MAX_COLLISIONS: 100,
+        STRIP_EXIF_ENABLED: true,
+      };
+      injectMock('../../src/config', mockConfig);
+      const { downloadFileWithRetry } = require('../../src/services/downloader');
+
+      const result = await downloadFileWithRetry('123/documento.pdf', destFile);
+
+      expect(mockSharp).not.toHaveBeenCalled();
+      expect(result.size).toBe(pdfBuffer.length);
+
+      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     });
   });
 });
