@@ -107,7 +107,7 @@ const config = {
   BACKFILL_MAX_JOBS: parseInt(process.env.BACKFILL_MAX_JOBS, 10) || 100,
   BACKFILL_MAX_PENDING: parseInt(process.env.BACKFILL_MAX_PENDING, 10) || 200,
   DASHBOARD_CACHE_TTL_MS: 5000,
-  SECONDARY_CACHE_TTL_MS: parseInt(process.env.SECONDARY_CACHE_TTL_MS, 10) || 5000,
+  SECONDARY_CACHE_TTL_MS: parseInt(process.env.SECONDARY_CACHE_TTL_MS, 10) || 30000,
 
   // Tolerancia a fallos de descarga
   DOWNLOAD_TOLERANCE_PERCENT: parseInt(process.env.DOWNLOAD_TOLERANCE_PERCENT, 10) || 0,
